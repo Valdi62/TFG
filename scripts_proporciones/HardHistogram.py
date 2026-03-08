@@ -80,7 +80,7 @@ class HardHistogram(nn.Module):
             # Thresholding
             sample = self.threshold(sample)
 
-            # Gloval average pooling
+            # Global average pooling
             # input = self.hist_pool(input)
             sample = torch.mean(sample, dim=2)
 

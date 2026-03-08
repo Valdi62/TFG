@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from models import MRConvolutionalModel
+from models import MRConvolutionalModel,MRConvolutionalModelHistogram
 import torch.nn.functional as F
 import pandas as pd
 from create_dataset import CustomImageDataset
@@ -297,8 +297,10 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
     # Llamamos a la función que crea el modelo
     if model_type == "MRConvolutional":
         model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
+    elif model_type == "MRConvolutional_Hist":
+        model = MRConvolutionalModelHistogram(model_name,32,dropout,size1,size2).to(device)
     else:
-        raise ValueError(f"El tipo de modelo {model_type} no está soportado, elija uno entre ['MRConvolutional']")
+        raise ValueError(f"El tipo de modelo {model_type} no está soportado, elija uno entre ['MRConvolutional','MRConvolutional_Hist]")
     
     # Primero entrenamos solo la cabeza del modelo
     obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,patience1,max_epochs1,lr1,label_smoothing,
@@ -312,6 +314,8 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         torch.cuda.empty_cache()
         if model_type == "MRConvolutional":
             model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
+        elif model_type == "MRConvolutional_Hist":
+            model = MRConvolutionalModelHistogram(model_name,32,dropout,size1,size2).to(device)
         model.load_state_dict(torch.load(f"./{model.name}_best_model.pth",map_location=device))
 
         # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
@@ -358,7 +362,7 @@ def main():
     train_dataloader_def = DataLoader(train_dataset_def, batch_size=64, shuffle=True, pin_memory=True)
     val_dataloader_def = DataLoader(val_dataset_def, batch_size=128, shuffle=False, pin_memory=True)
 
-    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader_def,lr1=5e-4,lr2=4.5e-5,dropout=0.15,bloques=2,size1=512,size2=128,
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader_def,lr1=5e-4,lr2=4.5e-5,dropout=0.15,bloques=2,size1=512,size2=1024,
                       patience1=10,patience2=15,max_epochs1=50,max_epochs2=60,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":

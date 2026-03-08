@@ -109,12 +109,12 @@ class MRConvolutionalModelHistogram(nn.Module):
 
         self.layers = nn.Sequential(nn.Dropout(dropout),
                                     nn.Linear(size1*self.num_bins,size2),
-                                    nn.BatchNorm1d(size2),
+                                    # nn.BatchNorm1d(size2),
                                     nn.ReLU(),
 
                                     nn.Dropout(dropout),
                                     nn.Linear(size2,size3),
-                                    nn.BatchNorm1d(size3),
+                                    # nn.BatchNorm1d(size3),
                                     nn.ReLU(),
                                     
                                     nn.Dropout(dropout),
