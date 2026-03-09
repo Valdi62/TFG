@@ -1,6 +1,11 @@
 import torch.nn as nn
 from torchvision import models
-from HardHistogramBatched import HardHistogramBatched
+import sys
+import os
+
+# Se añade la carpeta general a la ruta para poder realizar imports como ruta absoluta
+sys.path.append(os.path.abspath(os.path.curdir))
+from scripts_proporciones.HardHistogramBatched import HardHistogramBatched
 
 # --- MR = MultivariateRegression ---
 
@@ -45,7 +50,7 @@ class MRConvolutionalModel(nn.Module):
         self.layers = nn.Sequential(nn.ReLU(),
                                     nn.Dropout(dropout),
                                     nn.Linear(size1,size2),
-                                    nn.BatchNorm1d(size2),
+                                    # nn.BatchNorm1d(size2),
                                     nn.ReLU(),
                                     nn.Dropout(dropout),
                                     nn.Linear(size2,10),

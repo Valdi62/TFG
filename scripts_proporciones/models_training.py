@@ -2,14 +2,17 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from models import MRConvolutionalModel,MRConvolutionalModelHistogram
 import torch.nn.functional as F
 import pandas as pd
-from create_dataset import CustomImageDataset
 from torch.utils.data import DataLoader
-import seaborn as sns
 import plotly.express as px
-import matplotlib.pyplot as plt
+import sys
+import os
+
+# Se añade la carpeta general a la ruta para poder realizar imports como ruta absoluta
+sys.path.append(os.path.abspath(os.path.curdir))
+from scripts_proporciones.models import MRConvolutionalModel,MRConvolutionalModelHistogram
+from scripts_proporciones.create_dataset import CustomImageDataset
 
 
 # Divergencia KL ponderada
@@ -122,8 +125,6 @@ def save_graph(history,module,model,fine_tuning=0):
 def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
     # - Función con el bucle de validación -
 
-    # Como función de pérdida vamos a combinar la MAE y la divergencia KL para aproximar la distribución de probabilidad
-    # En este caso no utilizamos la clase WeightedKLDivLoss sino que usamos la divergencia kl clásica para tener un interpretación directa de que tan bueno es el modelo
     mae_loss_module = nn.L1Loss()
     kl_divergence_module = nn.KLDivLoss(reduction="batchmean")
 
@@ -136,6 +137,7 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
         for data_inputs, data_labels in val_dataloader:
             data_inputs = data_inputs.to(device)
             data_labels = data_labels.to(device)
+
             # Vamos a evitar que las etiquetas tengan el valor exacto 0 para evitar que la divergencia kl colapse
             smooth_labels = data_labels*(1-label_smoothing)+label_smoothing/10
 
@@ -143,17 +145,16 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
             # Calcular el valor de la función de pérdida mae y la divergencia kl
             y_pred = torch.exp(log_preds)
-            # Al usar reduction="sum" con la L1Loss para no darle el mismo peso al último batch (que suele tener menos ejemplos), debemos dividir entre el número de clases
-            #  para que el resultado sea consistente y muestre el MAE por foto
+
             val_mae_loss += mae_loss_module(y_pred,data_labels).item()
             val_kl_divergence += kl_divergence_module(log_preds,smooth_labels).item()
             # Calculamos ademas el MAE por cada clase individual
-            class_mae_loss += torch.sum(torch.abs(y_pred-data_labels),dim=0)/len(data_labels)
+            class_mae_loss += torch.mean(torch.abs(y_pred-data_labels),dim=0)
 
         return val_mae_loss/len(val_dataloader),val_kl_divergence/len(val_dataloader),class_mae_loss/len(val_dataloader)
 
 
-def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
+def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('inf'),patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
                 device="cpu",fine_tuning=False,callback=None,start_epoch=0):
     # - Función con el bucle de entrenamiento de los modelos -
     min_kl_divergence = float('inf')
@@ -267,8 +268,11 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         if val_kl_divergence < min_kl_divergence:
             min_kl_divergence = val_kl_divergence
             no_improvement = 0
-            torch.save(model.state_dict(),f"./{model.name}_best_model.pth")
             mejor_log = current_log
+
+            if val_kl_divergence < global_min_kl:
+                torch.save(model.state_dict(),f"./{model.name}_best_model.pth")
+                global_min_kl = val_kl_divergence
         else:
             no_improvement += 1
         print(current_log)
@@ -303,7 +307,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         raise ValueError(f"El tipo de modelo {model_type} no está soportado, elija uno entre ['MRConvolutional','MRConvolutional_Hist]")
     
     # Primero entrenamos solo la cabeza del modelo
-    obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,patience1,max_epochs1,lr1,label_smoothing,
+    obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,float('inf'),patience1,max_epochs1,lr1,label_smoothing,
                            device,fine_tuning=False,callback=callback,start_epoch=0)
 
     # --- No hacer fine tuning hasta hasta haber decidido el mejor modelo con la búsqueda de hiperparámetros ---
@@ -335,7 +339,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
 
         for param in layers:
             param.requires_grad=True
-        obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,patience2,max_epochs2,lr2,label_smoothing,
+        obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,obj_loss,patience2,max_epochs2,lr2,label_smoothing,
                                device,fine_tuning=True,callback=callback,start_epoch=next_epoch)
 
     del model
