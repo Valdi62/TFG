@@ -8,11 +8,8 @@ from torch.utils.data import DataLoader
 import plotly.express as px
 import sys
 import os
-
-# Se añade la carpeta general a la ruta para poder realizar imports como ruta absoluta
-sys.path.append(os.path.abspath(os.path.curdir))
-from scripts_proporciones.models import MRConvolutionalModel,MRConvolutionalModelHistogram
-from scripts_proporciones.create_dataset import CustomImageDataset
+from . models import MRConvolutionalModel,MRConvolutionalModelHistogram
+from . create_dataset import CustomImageDataset
 
 
 # Divergencia KL ponderada
@@ -357,16 +354,16 @@ def main():
 
     # Cargamos en data frames los conjuntos de datos ya divididos
     train_def = pd.read_csv("./dataset_dividido/train_def.csv")
-    val_def = pd.read_csv("./dataset_dividido/val_def.csv")
+    val = pd.read_csv("./dataset_dividido/val.csv")
     # El de test lo usaremos más tarde para comparar y no ahora para entrenar
 
     # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
     train_dataset_def = CustomImageDataset("./fotos_recortadas",train_def,True)
-    val_dataset_def = CustomImageDataset("./fotos_recortadas",val_def,True)
+    val_dataset = CustomImageDataset("./fotos_recortadas",val,True)
     train_dataloader_def = DataLoader(train_dataset_def, batch_size=64, shuffle=True, pin_memory=True)
-    val_dataloader_def = DataLoader(val_dataset_def, batch_size=128, shuffle=False, pin_memory=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=128, shuffle=False, pin_memory=True)
 
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader_def,lr1=5e-4,lr2=4.5e-5,dropout=0.15,bloques=2,size1=1024,size2=512,
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=4.5e-5,dropout=0.15,bloques=2,size1=1024,size2=512,
                       size3=128,patience1=10,patience2=15,max_epochs1=50,max_epochs2=60,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":

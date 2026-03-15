@@ -2,10 +2,7 @@ import torch.nn as nn
 from torchvision import models
 import sys
 import os
-
-# Se añade la carpeta general a la ruta para poder realizar imports como ruta absoluta
-sys.path.append(os.path.abspath(os.path.curdir))
-from scripts_proporciones.HardHistogramBatched import HardHistogramBatched
+from . HardHistogramBatched import HardHistogramBatched
 
 # --- MR = MultivariateRegression ---
 
