@@ -1,3 +1,0 @@
-Monitorización de la abundancia de Zostera Noltii a partir de imágenes georeferencadas
-
-Este Trabajo de Fin de Grado tiene como objetivo desarrollar un sistema para la monitorización de la abundancia de la planta acuática Zostera noltii utilizando imágenes georreferenciadas capturadas con un dispositivo móvil durante exploraciones terrestres en la zona de estudio. El proyecto se centrará en la creación de un modelo que permita predecir la presencia o ausencia de esta especie, así como el grado de ocupación en el área de estudio. El propósito final es evaluar la salud y el estado de las praderas de Zostera a partir del análisis de estas imágenes individuales, proporcionando una herramienta útil para la gestión y conservación de este ecosistema.

@@ -5,7 +5,6 @@ from torchvision.io import read_image
 from skmultilearn.model_selection import iterative_train_test_split
 from torchvision import transforms
 import pandas as pd
-from torch.utils.data import DataLoader
 import os
 
 

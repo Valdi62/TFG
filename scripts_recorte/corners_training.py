@@ -7,6 +7,7 @@ from corners_dataset import CustomImageDataset
 import pandas as pd
 import sklearn
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 # Bucles de validación
@@ -98,6 +99,10 @@ def train_model(model,opt,train_dataloader,val_dataloader,loss_module_coords,pat
     else:
         raise ValueError(f"El optimizado {opt} no está soportado, elija uno entre ['SGD','AdamW','Adam','RMSprop']")
 
+    # Vamos a implementar una técnica de reducción del learning rate a medida que el modelo va estancandose en el entrenamiento
+    # De esta forma cuando se este acercando al mínimo, se podrán ajustar los pesos de forma más precisa para optimizarlos
+    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3))
+
     # Bucle de entrenamiento
     pbar = tqdm(range(max_epochs))
     for epoch in pbar:
@@ -156,6 +161,9 @@ def train_model(model,opt,train_dataloader,val_dataloader,loss_module_coords,pat
         objective_loss = val_coords_mae + (1-precision)
         # Las losses no son igual de importantes y la MAE en este caso es más importante porque es más dificil predecir coordenadas que si tiene o no esquinas
         
+        # Actualizamos con la objective loss nuestro scheduler que controla cuando se reduce el learning rate
+        scheduler.step(objective_loss)
+
         current_log=("Training corners Loss %0.4f, Validation corners Loss %0.4f, has_corners accuracy %0.2f%%, has_corners precision %0.2f%%, has_corners recall %0.2f%% \n"
                     "Patience: %d/%d, Training coords Loss %0.4f, Training MAE Loss %0.4f, Validation coords Loss %0.4f, Validation MAE loss %0.4f, Objective loss %0.4f " % 
                     (epoch_corners_loss/len(train_dataloader), val_corners_loss, val_accuracy*100, precision*100, recall*100,no_improvement, patience,
@@ -328,8 +336,14 @@ def main():
     val_dataloader = DataLoader(val_dataset, batch_size=16, shuffle=False, pin_memory=True)
 
     model = TransferLearning("EfficientNetB3",0.01,550,150).to(device)
-    loss_module_coords = nn.SmoothL1Loss(beta=0.1)
-    obj_loss,_ = train_model(model,"Adam",train_dataloader,val_dataloader,loss_module_coords,50,200,0.9,0.1,9e-4,device)
+    layers = list(model.model.features[-3:].parameters())
+    # Descongelamos los pesos de los últimos tres bloques del modelo pre-entrenado de la base que hemos elegido usar
+    for param in layers:
+        param.requires_grad=True
+
+
+    loss_module_coords = nn.L1Loss()
+    obj_loss,_ = train_model(model,"AdamW",train_dataloader,val_dataloader,loss_module_coords,50,200,0.9,0.1,1e-3,device)
     print(obj_loss)
     
 if __name__ == "__main__":

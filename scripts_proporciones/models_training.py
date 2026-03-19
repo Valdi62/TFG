@@ -6,8 +6,6 @@ import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import DataLoader
 import plotly.express as px
-import sys
-import os
 from . models import MRConvolutionalModel,MRConvolutionalModelHistogram
 from . create_dataset import CustomImageDataset
 
@@ -195,7 +193,6 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
     # Vamos a implementar una técnica de reducción del learning rate a medida que el modelo va estancandose en el entrenamiento
     # De esta forma cuando se este acercando al mínimo, se podrán ajustar los pesos de forma más precisa para optimizarlos
     scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3))
-    # Por defecto reducimos el lr al 1/10 si no mejora durante la mitad de etapas de la paciencia que tiene el modelo
 
     # Bucle de entrenamiento
     pbar = tqdm(range(max_epochs))

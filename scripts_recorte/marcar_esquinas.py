@@ -51,7 +51,7 @@ def main():
     if not os.path.exists(salida_csv):
         with open(salida_csv, mode="w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["image","has_corners","x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4"])
+            writer.writerow(["image","has_corners","x1","y1","x2","y2","x3","y3","x4","y4"])
 
     # Recorremos todas las imágenes
     for nombre_imagen in imagenes:

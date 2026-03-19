@@ -1,7 +1,5 @@
 import torch.nn as nn
 from torchvision import models
-import sys
-import os
 from . HardHistogramBatched import HardHistogramBatched
 
 # --- MR = MultivariateRegression ---
@@ -130,4 +128,6 @@ class MRConvolutionalModelHistogram(nn.Module):
 
 # 3. Red Neuronal que usa un Vision Transformer como base
 class MRVisionTransformer(nn.Module):
-    pass
+    def __init__(self,base_model):
+        super().__init__()
+        self.base_model = base_model
