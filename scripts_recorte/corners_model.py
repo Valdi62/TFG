@@ -7,38 +7,30 @@ class TransferLearning(nn.Module):
         self.base_model=base_model
 
         # Cargar el modelo deseado
-        if self.base_model == "MobileNetV2":
-            self.model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V2)   
+        if self.base_model == "ResNet50":
+           self.model  = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+           self.model.fc = nn.Identity()
+           self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(2048,size1))
+        elif self.base_model == "EfficientNetV2_small":
+            self.model = models.efficientnet_v2_s(weights=models.EfficientNet_V2_S_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1280,size1))
-
-        elif self.base_model == "ResNet34":
-           self.model  = models.resnet34(weights=models.ResNet34_Weights.IMAGENET1K_V1)
-           self.model.fc = nn.Identity()
-           self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(512,size1))
-
-        elif self.base_model == "EfficientNetB3":
-            self.model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
-            self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1536,size1))
-
         elif self.base_model == "ConvNeXt_tiny":
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
-        elif self.base_model == "ConvNeXt_small":
-            self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
+        # Si queremos que los modelos se puedan ejecutar de forma agil en dispositivos móviles para estudios de campo, este modelo ligero puede ser una buena alternativa
+        elif self.base_model == "MobileNet_V3_Large":
+            self.model = models.mobilenet_v3_large(weights=models.MobileNet_V3_Large_Weights.IMAGENET1K_V2)
             self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
+            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(960,size1))
 
         else:
-            raise ValueError(f"El modelo base {base_model} no está permitido")
-
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','MobileNet_V3_Large']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():
             param.requires_grad = False      
-            
                                 
         self.layers = nn.Sequential(nn.ReLU(),
                                     nn.Dropout(dropout),

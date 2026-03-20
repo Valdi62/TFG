@@ -319,8 +319,6 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
         if model_name == "ResNet50":
             layers = list(model.model.layer4.parameters())
-        elif model_name == "RegNetY_3_2GF":
-            layers = list(model.model.trunk_output[-1].parameters())
         elif model_name == "EfficientNetV2_small":
             # En 'EfficientNetV2_small' hay un bloque de normalizacion al final que descongelaremos a parte del último
             layers = list(model.model.features[-2:].parameters())

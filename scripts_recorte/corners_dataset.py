@@ -4,6 +4,9 @@ from torch.utils.data import Dataset
 from torchvision.io import read_image
 from torchvision.transforms.functional import rotate
 from torchvision import transforms
+import os
+import sklearn
+import pandas as pd
 
 class CustomImageDataset(Dataset):
     """ 
@@ -61,7 +64,7 @@ class CustomImageDataset(Dataset):
             coords = self.labels[idx][1:]
             has_corners = torch.tensor(has_corners)
 
-            ###   ¡¡¡IMPORTANTE!!!   ###
+            ###   IMPORTANTE   ###
             # Normalizamos las coordenadas en función de estas dimensiones fijas porque son las que se usaro durante su etiquetado
             # es decir todas las fotos se rotaron y ajustaron en tamaño antes de etiquetarlas
             coords = torch.tensor(coords)
@@ -70,3 +73,42 @@ class CustomImageDataset(Dataset):
         else:
             return image,image_name
     
+def corners_dataset(df,target_col,out_dir,train_size=0.7):
+    """
+    Función para dividir un conjunto de datos en formato data frame de pandas en conjuntos de train, val y test que se almacenarán como 
+    documentos csv en un directorio de salida elegido con esos nombres y '_crop' añadido.
+
+    Parámetros:
+        df           - data frame con los registros a separar por conjuntos
+        target_col   - columna con los valores que queremos distribuir de forma equilibrada
+        out_dir      - nombre del directorio de salida en el que almacenar los datasets divididos
+        train_size   - tamaño del conjunto de entrenamiento (el de validación y el de test siempre será cada uno la mitad del tamaño restante)
+    """
+    # Fijamos una semilla para replicabilidad para este trabajo
+    torch.manual_seed(67)
+
+    # Creamos el directorio de salida si no existiera
+    os.makedirs(out_dir,exist_ok=True)
+
+    # Dividimos los ejemplos entre conjuntos de train, val y test
+    train,trial=sklearn.model_selection.train_test_split(df, test_size=1-train_size,stratify=df[target_col],random_state = 67)
+    val,test=sklearn.model_selection.train_test_split(trial, test_size=0.5,stratify=trial[target_col],random_state = 67)
+
+    # Almacenamos los dataframes en formato csv
+    train.to_csv(f"{out_dir}/train_crop.csv",index=False)
+    val.to_csv(f"{out_dir}/val_crop.csv",index=False)
+    test.to_csv(f"{out_dir}/test_crop.csv",index=False)
+
+def main():
+    """
+    Desde el main de este script en caso de ejecutarlo directamente lo que hacemos es crear un conjunto de entrenamiento, validación y test utilizando
+    la columnas 'has_corners' del dataset para dividir los ejemplos de forma equilibrada.
+    """
+    # Cargamos el csv con las etiquetas
+    labels = pd.read_csv("esquinas.csv")
+    target_col = "has_corners"
+    out_dir = "./dataset_dividido"
+    corners_dataset(labels,target_col,out_dir,train_size=0.7)
+    
+if __name__ == "__main__":
+    main()

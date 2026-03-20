@@ -92,7 +92,7 @@ class CustomImageDataset(Dataset):
 
 def create_dataset(df,target_cols,out_dir,train_size=0.7,augmentation=False):
     """
-    Función para dividir un conjunto de datos en formato data frame en conjuntos de train, val y test que se almacenarán como 
+    Función para dividir un conjunto de datos en formato data frame de pandas en conjuntos de train, val y test que se almacenarán como 
     documentos csv en un directorio de salida elegido con esos mismos nombres. En caso de querer añadir imagenes creadas mediante
     data augmentation a los datasets se deberá indicar y se añadirán tres archivos csv nuevos que incluirán los registros originales
     asi como los nuevos registros aumentados que tendrán las mismas etiquetas que los originales pero los caracteres 'RE_' delante
@@ -107,7 +107,7 @@ def create_dataset(df,target_cols,out_dir,train_size=0.7,augmentation=False):
         augmentation - parámetro para indicar si se incluirán imágenes aumentadas o no
 
     """
-    # Fijamos una semilla para replicabilidad para este trabajo pero en la práctica se eliminaria para fomental la aleatoriedad
+    # Fijamos una semilla para replicabilidad para este trabajo
     torch.manual_seed(67)
     np.random.seed(67)
 
