@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torchvision import models
 from . HardHistogramBatched import HardHistogramBatched
@@ -18,13 +19,8 @@ class MRConvolutionalModel(nn.Module):
             self.model = models.efficientnet_v2_s(weights=models.EfficientNet_V2_S_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1280,size1))
-        # ConvNeXt es la familia ganadora y por tanto probamos en profundidad sus modelos
         elif self.base_model == "ConvNeXt_tiny":
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
-            self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
-        elif self.base_model == "ConvNeXt_small":
-            self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
         # MobileNet se va a estudiar como una alternativa ligera que pueda ejecutarse en dispositivos móviles para poder realizar un estudio de campo rápido
@@ -36,7 +32,7 @@ class MRConvolutionalModel(nn.Module):
             self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(960,size1))
 
         else:
-            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','ConvNext_small','MobileNet_V3_Large']")
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','MobileNet_V3_Large']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():
@@ -45,12 +41,11 @@ class MRConvolutionalModel(nn.Module):
         self.layers = nn.Sequential(nn.ReLU(),
                                     nn.Dropout(dropout),
                                     nn.Linear(size1,size2),
-                                    # nn.BatchNorm1d(size2),
                                     nn.ReLU(),
                                     nn.Dropout(dropout),
                                     nn.Linear(size2,10),
-                                    nn.LogSoftmax(dim=1) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
-                                   )
+                                    nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
+                                   
 
     def forward(self, x):
         x = self.model(x)
@@ -101,12 +96,10 @@ class MRConvolutionalModelHistogram(nn.Module):
 
         self.layers = nn.Sequential(nn.Dropout(dropout),
                                     nn.Linear(size1,size2),
-                                    # nn.BatchNorm1d(size2),
                                     nn.ReLU(),
 
                                     nn.Dropout(dropout),
                                     nn.Linear(size2,size3),
-                                    # nn.BatchNorm1d(size3),
                                     nn.ReLU(),
                                     
                                     nn.Dropout(dropout),
@@ -128,6 +121,46 @@ class MRConvolutionalModelHistogram(nn.Module):
 
 # 3. Red Neuronal que usa un Vision Transformer como base
 class MRVisionTransformer(nn.Module):
-    def __init__(self,base_model):
+    def __init__(self,base_model,dropout=0.2,size1=512,size2=128):
         super().__init__()
         self.base_model = base_model
+        # Cargar el modelo deseado
+        if self.base_model == "ViT_B_16":
+           self.model  = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1)
+           self.model.heads = nn.Identity()
+           self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(768,size1))
+        elif self.base_model == "Swin_V2_S":
+           self.model  = models.swin_v2_s(weights=models.Swin_V2_S_Weights.IMAGENET1K_V1)
+           self.model.head = nn.Identity()
+           self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(768,size1))
+        # El tercer Vision Transformer que vamos a probar se carga desde el repositorio de Meta
+        elif self.base_model == "DINOv2_ViT_B":
+            self.model = torch.hub.load("facebookresearch/dinov2","dinov2_vitb14")
+            # DINOv2_ViT_B no tiene cabeza de clasificación
+            self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(768, size1))
+
+        else:
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ViT_B_16','Swin_V2_S','DINOv2_ViT_B']")
+
+        # Congelar todos los pesos del modelo pre-entrenado inicialmente
+        for param in self.model.parameters():
+            param.requires_grad = False              
+                                
+        self.layers = nn.Sequential(nn.ReLU(),
+                                    nn.Dropout(dropout),
+                                    nn.Linear(size1,size2),
+                                    nn.ReLU(),
+                                    nn.Dropout(dropout),
+                                    nn.Linear(size2,10),
+                                    nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
+                                   
+
+    def forward(self, x):
+        x = self.model(x)
+        x = self.head(x)
+        x = self.layers(x)
+        return x
+
+    @property
+    def name(self):
+        return f"MRVisionT_{self.base_model}"

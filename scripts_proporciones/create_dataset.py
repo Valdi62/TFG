@@ -37,11 +37,11 @@ class CustomImageDataset(Dataset):
         'algas rojas'        - porcentaje de presencia que tiene este elemento en la foto     
         'microfitobentos'    - porcentaje de presencia que tiene este elemento en la foto          
     """
-    def __init__(self, images_dir,df,train=False):
+    def __init__(self, images_dir,df,train=False,img_size=384):
         self.images_dir = images_dir
         self.images = df["foto"].values
         self.transform = transforms.Compose([
-                         transforms.Resize((400,400)), # Transforma el tamaño de las imagenes
+                         transforms.Resize((img_size,img_size)), # Transforma el tamaño de las imagenes
                          transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1 para la normalización posterior
                          transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
                          ])

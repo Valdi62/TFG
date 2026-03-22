@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import DataLoader
 import plotly.express as px
-from . models import MRConvolutionalModel,MRConvolutionalModelHistogram
+from . models import MRConvolutionalModel,MRConvolutionalModelHistogram,MRVisionTransformer
 from . create_dataset import CustomImageDataset
 
 
@@ -96,24 +96,6 @@ def save_graph(history,module,model,fine_tuning=0):
 
     # Guardamos la gráfica en formato .html para que sea interactiva
     fig.write_html(f"evolucion_{module}_{model}.html")
-
-    # Código para hacerlo con seaborn y matplotlib
-    """    
-    # Configuramos y representamos la gráfica
-    sns.set_theme(style="whitegrid")
-    plt.figure(figsize=(10,6))
-    sns.lineplot(data=df,x="epoch",y=module,hue="type",marker="o")
-    plt.title(f"Evolución del {module.upper()} en el entrenamiento de {model}")
-    plt.legend(frameon=False)
-    plt.xlabel("Época")
-    plt.ylabel(f"{module.upper()} loss")
-    if fine_tuning>0:
-        plt.axvline(fine_tuning,color="red",label="Fine tuning")
-
-    # Guardamos la gráfica para un análisis posterior
-    plt.savefig(f"evolucion_{module}_{model}.png",dpi=400,bbox_inches="tight")
-    plt.close()
-    """
     
 
 # Bucles de validación
@@ -289,7 +271,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
 
 
 # Funcion del entrenamiento completo para realizar las dos etapas diferentes
-def complete_training(model_type,model_name,opt_name,train_dataloader,val_dataloader,lr1=0.001,lr2=0.00001,dropout=0.2,bloques=0,
+def complete_training(model_type,model_name,opt_name,train_dataloader,val_dataloader,lr1=0.001,lr2=0.00001,dropout=0.2,fine_tuning=False,
                       size1=1024,size2=512,size3=128,patience1=5,patience2=10,max_epochs1=25,max_epochs2=40,label_smoothing=0.01,device="cpu",callback=None):
     torch.cuda.empty_cache()
     # Llamamos a la función que crea el modelo
@@ -297,8 +279,10 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
     elif model_type == "MRConvolutional_Hist":
         model = MRConvolutionalModelHistogram(model_name,22,dropout,size1,size2,size3).to(device)
+    elif model_type == "MRVisionTransformer":
+        model = MRVisionTransformer(model_name,dropout,size1,size2).to(device)
     else:
-        raise ValueError(f"El tipo de modelo {model_type} no está soportado, elija uno entre ['MRConvolutional','MRConvolutional_Hist]")
+        raise ValueError(f"El tipo de modelo {model_type} no está soportado, elija uno entre ['MRConvolutional','MRConvolutional_Hist,'MRVisionTransformer]")
     
     # Primero entrenamos solo la cabeza del modelo
     obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,float('inf'),patience1,max_epochs1,lr1,label_smoothing,
@@ -306,7 +290,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
 
     # --- No hacer fine tuning hasta hasta haber decidido el mejor modelo con la búsqueda de hiperparámetros ---
     # Descongelamos los últimos bloques de los modelos base si queremos hacer un fine tuning adicional
-    if bloques>0:
+    if fine_tuning:
         # Borramos el modelo de memoria para después cargar el mejor modelo hasta el momento
         del model
         torch.cuda.empty_cache()
@@ -314,20 +298,29 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
             model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
         elif model_type == "MRConvolutional_Hist":
             model = MRConvolutionalModelHistogram(model_name,22,dropout,size1,size2,size3).to(device)
+        elif model_type == "MRVisionTransformer":
+            model = MRVisionTransformer(model_name,dropout,size1,size2).to(device)
         model.load_state_dict(torch.load(f"./{model.name}_best_model.pth",map_location=device))
 
         # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
         if model_name == "ResNet50":
             layers = list(model.model.layer4.parameters())
-        elif model_name == "EfficientNetV2_small":
-            # En 'EfficientNetV2_small' hay un bloque de normalizacion al final que descongelaremos a parte del último
+        elif model_name in ["ConvNeXt_tiny","EfficientNetV2_small"]:
+            # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
             layers = list(model.model.features[-2:].parameters())
-            
-        # Como la familia elegida es ConvNeXt, vamos a explorar un poco más su fine tuning 
-        elif model_name == "ConvNeXt_tiny":
-            layers = list(model.model.features[-bloques:].parameters())
-        elif model_name == "ConvNeXt_small":
-            layers = list(model.model.features[-bloques:].parameters())
+        # De MobileNet descongelmos algún bloque más por ser mucho más ligera y por eso podemos permitirnoslo
+        elif model_name == "MobileNet_V3_Large":
+            layers = list(model.model.features[-4:].parameters())
+        
+        # Para los vision transformers
+        elif model_name == "ViT_B_16":
+            # Descongelamos el último bloque de transformer y la capa de normalización final
+            layers = list(model.model.encoder.layers[-1].parameters()) + list(model.model.encoder.ln.parameters())
+        elif model_name == "Swin_V2_S":
+            layers = list(model.model.features[-2:].parameters())
+        elif model_name == "DINOv2_ViT_B":
+            # Descongelamos el último bloque de transformer y la capa de normalización final
+            layers = list(model.model.blocks[-1].parameters()) + list(model.model.norm.parameters())
 
         for param in layers:
             param.requires_grad=True
@@ -358,8 +351,8 @@ def main():
     train_dataloader_def = DataLoader(train_dataset_def, batch_size=64, shuffle=True, pin_memory=True)
     val_dataloader = DataLoader(val_dataset, batch_size=128, shuffle=False, pin_memory=True)
 
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=4.5e-5,dropout=0.15,bloques=2,size1=1024,size2=512,
-                      size3=128,patience1=10,patience2=15,max_epochs1=50,max_epochs2=60,label_smoothing=0.01,device=device)
+    complete_training("MRVisionTransformer","ViT_B_16","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=4.5e-5,dropout=0.15,fine_tuning=True,
+                      patience1=10,patience2=15,max_epochs1=40,max_epochs2=50,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
     main()

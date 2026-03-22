@@ -121,6 +121,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
         epoch_corners_loss = 0
         epoch_coords_loss = 0
         epoch_mae_loss = 0
+        epoch_total_loss = 0
 
         for data_inputs, data_labels in train_dataloader:
             # Hacer una pasada hacia delante
@@ -150,7 +151,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
                 total_loss = corners_weights * loss_corners + coords_weights * loss_coords
             else:
                 total_loss = loss_corners
-
+            epoch_total_loss += total_loss
+            
             # Reiniciar los gradientes
             optimizer.zero_grad()
             # Pasada hacia atrás
@@ -169,9 +171,9 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
         scheduler.step(objective_loss)
 
         current_log=("Training corners Loss %0.4f, Validation corners Loss %0.4f, has_corners accuracy %0.2f%%, has_corners precision %0.2f%%, has_corners recall %0.2f%% \n"
-                    "Patience: %d/%d, Training coords Loss %0.4f, Training MAE Loss %0.4f, Validation coords Loss %0.4f, Validation MAE loss %0.4f, Objective loss %0.4f " % 
+                    "Patience: %d/%d, Training coords Loss %0.4f, Training MAE Loss %0.4f, Validation coords Loss %0.4f, Validation MAE loss %0.4f, Total Train Loss %0.4f, Objective loss %0.4f " % 
                     (epoch_corners_loss/len(train_dataloader), val_corners_loss, val_accuracy*100, precision*100, recall*100,no_improvement, patience,
-                    epoch_coords_loss/max(1,total_positives), epoch_mae_loss/max(1,total_positives), val_coords_loss, val_coords_mae, objective_loss))
+                    epoch_coords_loss/max(1,total_positives), epoch_mae_loss/max(1,total_positives), val_coords_loss, val_coords_mae,epoch_total_loss/len(train_dataloader),objective_loss))
 
         # Intentamos llamar al callback pero si no lo tenemos definido simplemente lo ignoramos
         if callback is not None:
@@ -223,7 +225,7 @@ def complete_training_crop(model_name,opt_name,train_dataloader,val_dataloader,c
         elif model_name in ["ConvNeXt_tiny","EfficientNetV2_small"]:
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
             layers = list(model.model.features[-2:].parameters())
-        # De mobilenet descongelmos algún bloque más por ser mucho más ligera y por eso podemos permitirnoslo
+        # De MobileNet descongelmos algún bloque más por ser mucho más ligera y por eso podemos permitirnoslo
         elif model_name == "MobileNet_V3_Large":
             layers = list(model.model.features[-4:].parameters())
 
