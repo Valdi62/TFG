@@ -107,10 +107,6 @@ def create_dataset(df,target_cols,out_dir,train_size=0.7,augmentation=False):
         augmentation - parámetro para indicar si se incluirán imágenes aumentadas o no
 
     """
-    # Fijamos una semilla para replicabilidad para este trabajo
-    torch.manual_seed(67)
-    np.random.seed(67)
-
     # Creamos el directorio de salida si no existiera
     os.makedirs(out_dir,exist_ok=True)
 
@@ -160,6 +156,10 @@ def main():
     Desde el main de este script en caso de ejecutarlo directamente lo que hacemos es crear un conjunto de entrenamiento, validación y test utilizando estratificación
     iterativa para solventar posibles problemas de desequilibrio de clases, para ello le pasamos una lista con las columnas que nos interesan como etiqueta.
     """
+    # Fijamos una semilla por replicabilidad
+    torch.manual_seed(67)
+    np.random.seed(67)
+
     # Cargamos el csv con las etiquetas
     labels = pd.read_csv("etiquetas_fotos.csv")
     ## Como tenemos desequilibrio de clases y algunas aparecen en muy pocas fotos, vamos a utilizar estratificación iterativa de forma que se vayan repartiendo las clases

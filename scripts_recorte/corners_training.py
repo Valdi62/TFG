@@ -3,11 +3,30 @@ import torch.nn as nn
 from corners_model import TransferLearning
 from sklearn.metrics import precision_score, recall_score
 from tqdm import tqdm
-from corners_dataset import CustomImageDataset
 import pandas as pd
-import sklearn
-from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+import plotly.express as px
+
+
+# Función para generar las gráficas del entrenamiento
+def save_graph(history,module,model,fine_tuning=0):
+    # Convertimos a data frame para utilizar seaborn a la hora de crear gráficas
+    df = pd.DataFrame(history)
+    # Agrupamos tanto el error de entrenamiento como el de validación en la misma columna
+    df = df.melt(id_vars="epoch",var_name="type", value_name=module)
+
+    # Construimos y configuramos la gráfica
+    fig = px.line(df,x="epoch",y=module,color="type",
+            title=f"Evolución del {module.upper()} en el entrenamiento de {model}",
+            labels={"epoch":"Época",module:f"{module.upper()} loss"})
+    #fig.update_layout(template="white")
+
+    # Añadimos una línea vertical para indicar cuando empieza el fine tuning
+    if fine_tuning > 1:
+        fig.add_vline(x=fine_tuning,line_dash="dash",line_color="red",annotation_text="Fine tuning")
+
+    # Guardamos la gráfica en formato .html para que sea interactiva
+    fig.write_html(f"evolucion_{module}_{model}.html")
 
 
 # Bucles de validación
@@ -72,7 +91,7 @@ def validation(model,val_dataloader,device="cpu"):
         return (accuracy,precision,recall,val_corners_loss/len(val_dataloader),val_coords_loss/max(1,total_positives),val_coords_mae/max(1,total_positives))
 
 
-def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('inf'),patience=5,max_epochs=30,coords_weights=1,corners_weights=1,learning_rate=0.001,
+def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,coords_weights=1,corners_weights=1,learning_rate=0.001,
                 device="cpu",fine_tuning=False,callback=None,start_epoch=0):
     # - Función con el bucle de entrenamiento de clasificación y regresión -
 
@@ -80,6 +99,13 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
     no_improvement = 0
     mejor_log=None
     last_epoch=0
+
+    global history_mae,history_mse,history_bce,history_corners
+    if start_epoch==0:
+        history_mae = {"train_mae":[],"val_mae":[]}
+        history_mse = {"train_mse":[],"val_mse":[]}
+        history_bce = {"train_bce":[],"val_bce":[]}
+        history_corners = {"accuracy":[],"precision":[],"recall":[]}
 
     # Como función de pérdida para representar  las coordenadas usamos la MSE loss para penalizar errores grandes
     loss_module_coords = nn.MSELoss()
@@ -128,6 +154,10 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
             data_inputs = data_inputs.to(device)
             data_corners_labels = data_labels["classification"].to(device)
             data_coords_labels = data_labels["coordinates"].to(device)
+
+            # Reiniciar los gradientes
+            optimizer.zero_grad()
+            # Realizamos la pasada hacia delante
             preds = model(data_inputs)
 
             # Calcular el valor de la función de pérdida para ver si tiene esquinas
@@ -151,29 +181,44 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
                 total_loss = corners_weights * loss_corners + coords_weights * loss_coords
             else:
                 total_loss = loss_corners
-            epoch_total_loss += total_loss
+            epoch_total_loss += total_loss.item()
             
-            # Reiniciar los gradientes
-            optimizer.zero_grad()
             # Pasada hacia atrás
             total_loss.backward()
             # Actualizar los parámetros
             optimizer.step()
 
         # Calcular las métricas de validación
-        val_accuracy,precision,recall,val_corners_loss,val_coords_loss,val_coords_mae = validation(model,val_dataloader,device)
-
+        accuracy,precision,recall,val_corners_loss,val_coords_loss,val_coords_mae = validation(model,val_dataloader,device)
         # Comparamos el MAE de cada combinación porque es lo más intuitivo y fácil de interpretar
         objective_loss = val_coords_mae + (1-precision)
-        # Las losses no son igual de importantes y la MAE en este caso es más importante porque es más dificil predecir coordenadas que si tiene o no esquinas
-        
+
+        # Caculamos las pérdidas de entrenamiento promedio para esta etapa
+        mean_epoch_coords_loss = epoch_coords_loss/max(1,total_positives)
+        mean_epoch_mae = epoch_mae_loss/max(1,total_positives)
+        mean_epoch_corner_loss = epoch_corners_loss/len(train_dataloader)
+
+        # Almacenamos los valores de las pérdidas para visualizarlos posteriormente
+        history_mae["train_mae"].append(mean_epoch_mae)
+        history_mae["val_mae"].append(val_coords_mae)
+
+        history_mse["train_mse"].append(mean_epoch_coords_loss)
+        history_mse["val_mse"].append(val_coords_loss)
+
+        history_bce["train_bce"].append(mean_epoch_corner_loss)
+        history_bce["val_bce"].append(val_corners_loss)
+
+        history_corners["accuracy"].append(accuracy)
+        history_corners["precision"].append(precision)
+        history_corners["recall"].append(recall)
+
         # Actualizamos con la objective loss nuestro scheduler que controla cuando se reduce el learning rate
         scheduler.step(objective_loss)
 
         current_log=("Training corners Loss %0.4f, Validation corners Loss %0.4f, has_corners accuracy %0.2f%%, has_corners precision %0.2f%%, has_corners recall %0.2f%% \n"
                     "Patience: %d/%d, Training coords Loss %0.4f, Training MAE Loss %0.4f, Validation coords Loss %0.4f, Validation MAE loss %0.4f, Total Train Loss %0.4f, Objective loss %0.4f " % 
-                    (epoch_corners_loss/len(train_dataloader), val_corners_loss, val_accuracy*100, precision*100, recall*100,no_improvement, patience,
-                    epoch_coords_loss/max(1,total_positives), epoch_mae_loss/max(1,total_positives), val_coords_loss, val_coords_mae,epoch_total_loss/len(train_dataloader),objective_loss))
+                    (mean_epoch_corner_loss, val_corners_loss, accuracy*100, precision*100, recall*100,no_improvement, patience,
+                    mean_epoch_coords_loss, mean_epoch_mae, val_coords_loss,val_coords_mae,epoch_total_loss/len(train_dataloader),objective_loss))
 
         # Intentamos llamar al callback pero si no lo tenemos definido simplemente lo ignoramos
         if callback is not None:
@@ -183,10 +228,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
             min_objective_loss=objective_loss
             no_improvement = 0
             mejor_log=current_log
-
-            if objective_loss < global_min_obj:
-                torch.save(model.state_dict(), "./Corners_model.pth")
-                global_min_obj = objective_loss
+            torch.save(model.state_dict(),f"./{model.name}_model.pth")
         else:
             no_improvement += 1
 
@@ -196,7 +238,20 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_obj=float('
             print("No hay mejora por %d épocas. Parada Temprana!!" % patience)
             break
         
-    print(mejor_log)
+    print("\nMejor época:")
+    print(mejor_log,"\n")
+
+    # Añadimos las épocas que se hayan ejecutado
+    x = range(1,len(history_mae[f"train_mae"])+1)
+    history_mae["epoch"] = x
+    history_mse["epoch"] = x
+    history_bce["epoch"] = x
+    history_corners["epoch"] = x
+
+    save_graph(history_mae,"mae",model.name,start_epoch+0.5)
+    save_graph(history_mse,"mse",model.name,start_epoch+0.5)
+    save_graph(history_bce,"bce",model.name,start_epoch+0.5)
+    save_graph(history_corners,"has_corners",model.name,start_epoch+0.5)
     return min_objective_loss,start_epoch+last_epoch+1
 
 
@@ -208,7 +263,7 @@ def complete_training_crop(model_name,opt_name,train_dataloader,val_dataloader,c
     model = TransferLearning(model_name,dropout,size1,size2).to(device)
     
     # Primero entrenamos solo la cabeza del modelo
-    obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,float('inf'),patience1,max_epochs1,coords_weights,corners_weights,
+    obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,patience1,max_epochs1,coords_weights,corners_weights,
                                       lr1,device,fine_tuning=False,callback=callback,start_epoch=0)
 
     # Descongelamos los últimos bloques de los modelos base si queremos hacer un fine tuning adicional
@@ -217,21 +272,18 @@ def complete_training_crop(model_name,opt_name,train_dataloader,val_dataloader,c
         del model
         torch.cuda.empty_cache()
         model = TransferLearning(model_name,dropout=0.4,size1=512,size2=128).to(device)
-        model.load_state_dict(torch.load(f"./Corners_model.pth",map_location=device))
+        model.load_state_dict(torch.load(f"./{model.name}_model.pth",map_location=device))
 
         # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
         if model_name == "ResNet50":
             layers = list(model.model.layer4.parameters())
-        elif model_name in ["ConvNeXt_tiny","EfficientNetV2_small"]:
+        elif model_name in ["ConvNeXt_tiny","EfficientNet_B3","MobileNet_V3_Large"]:
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
             layers = list(model.model.features[-2:].parameters())
-        # De MobileNet descongelmos algún bloque más por ser mucho más ligera y por eso podemos permitirnoslo
-        elif model_name == "MobileNet_V3_Large":
-            layers = list(model.model.features[-4:].parameters())
 
         for param in layers:
             param.requires_grad=True
-        obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,obj_loss,patience2,max_epochs2,coords_weights,corners_weights,
+        obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,patience2,max_epochs2,coords_weights,corners_weights,
                                       lr2,device,fine_tuning=True,callback=callback,start_epoch=next_epoch)
 
     del model
@@ -245,7 +297,9 @@ def main():
     entrenamiento del mismo guardando nuestro mejor modelo que será el que posteriormente exportemos y utilicemos para realizar la 
     clasificación y el recorte de todas las imágenes.
     """
-    pass
+    # Fijamos una semilla para cuando se realice el entrenamiento final
+    torch.manual_seed(67)
+    torch.cuda.manual_seed_all(67)
     
 if __name__ == "__main__":
     main()

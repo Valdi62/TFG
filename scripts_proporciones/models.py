@@ -23,6 +23,11 @@ class MRConvolutionalModel(nn.Module):
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
+        # La familia ganadora es ConvNeXt por tanto exploramos un modelo algo mas potente para comprobar si merece la pena    
+        elif self.base_model == "ConvNeXt_small":
+            self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
+            self.model.classifier = nn.Identity()
+            self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
         # MobileNet se va a estudiar como una alternativa ligera que pueda ejecutarse en dispositivos móviles para poder realizar un estudio de campo rápido
         # Se comprobarán sus resultados que normalmente serán peores que los que obtienen los otros modelos, pero si son razonables puede ser una porpuesta interesante
         # Si se pretende usar aqui un modelo ligero, también habría que usarlo para el recorte de imágenes y poder combinar ambos
@@ -32,7 +37,7 @@ class MRConvolutionalModel(nn.Module):
             self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(960,size1))
 
         else:
-            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','MobileNet_V3_Large']")
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','ConvNeXt_small','MobileNet_V3_Large']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():
@@ -77,18 +82,18 @@ class MRConvolutionalModelHistogram(nn.Module):
                                       nn.Dropout(dropout),
                                       nn.Linear(768*self.num_bins,size1),
                                       nn.ReLU())
-            
         elif self.base_model == "ConvNeXt_small":
             self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
-            self.model.avgpool = nn.Identity()
+            self.model.avgpool = nn.Identity() # Eliminamos también la capa de pooling global antes de la capa de histograma
             self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Flatten(2),
+            self.head = nn.Sequential(nn.Flatten(2),                                    
                                       HardHistogramBatched(768,self.num_bins),
                                       nn.Dropout(dropout),
                                       nn.Linear(768*self.num_bins,size1),
-                                      nn.ReLU())
+                                      nn.ReLU())         
+
         else:
-            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['RegNetY_3_2GF','ResNet50','EfficientNetV2_small','ConvNeXt_tiny','ConvNext_small']")
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ConvNeXt_tiny','ConvNeXt_small']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():

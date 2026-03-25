@@ -2,7 +2,7 @@ import torch.nn as nn
 from torchvision import models
 
 class TransferLearning(nn.Module):
-    def __init__(self,base_model,dropout=0.4,size1=512,size2=128):
+    def __init__(self,base_model,dropout=0.3,size1=512,size2=128):
         super().__init__()
         self.base_model=base_model
 
@@ -11,10 +11,11 @@ class TransferLearning(nn.Module):
            self.model  = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
            self.model.fc = nn.Identity()
            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(2048,size1))
-        elif self.base_model == "EfficientNetV2_small":
-            self.model = models.efficientnet_v2_s(weights=models.EfficientNet_V2_S_Weights.IMAGENET1K_V1)
+        # EfficientNet es una alternativa ligera que funciona bien con menos imágenes que ConvNext_tiny
+        elif self.base_model == "EfficientNet_B3":
+            self.model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1280,size1))
+            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1536,size1))
         elif self.base_model == "ConvNeXt_tiny":
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
@@ -26,7 +27,7 @@ class TransferLearning(nn.Module):
             self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(960,size1))
 
         else:
-            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','MobileNet_V3_Large']")
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNet_B3','ConvNeXt_tiny','MobileNet_V3_Large']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():
@@ -54,4 +55,8 @@ class TransferLearning(nn.Module):
         coordinates=self.reg(x)
 
         return {"classification": has_corners, "coordinates": coordinates}
+    
+    @property
+    def name(self):
+        return f"Crop_{self.base_model}"
 

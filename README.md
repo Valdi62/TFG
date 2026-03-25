@@ -1,5 +1,5 @@
 # TFG
-Repositorio con todo el código de mi TFG - Sistema de monitorización de praderas marinas mediante análisis de imágenes georreferenciadas capturadas con dispositivos móviles
+Repositorio con todo el código del TFG - Sistema de monitorización de praderas marinas mediante análisis de imágenes georreferenciadas capturadas con dispositivos móviles
 
 ## Carpetas
 **- Hiperparametros_MRConvolutionalModel:** Resultados de la búsqueda de hiperparámetros utilizando optuna, para ajustar el modelo de multiregresión con base convolucional

@@ -24,7 +24,7 @@ class WeightedKLDivLoss(nn.Module):
         'log_preds'     - logaritmos con la predicción del modelo
         'targets'       - etiquetas reales a predecir
     """
-    def __init__(self,class_weights,reduction=None):
+    def __init__(self,class_weights,reduction="batchmean"):
         super().__init__()
         self.class_weights = class_weights
         self.reduction = reduction
@@ -32,9 +32,8 @@ class WeightedKLDivLoss(nn.Module):
     def forward(self,log_preds,targets):
         # Calculamos la divergencia kl por cada clase
         ## Debido a errores de aproximaciones numéricas del método de kl_div existe la posibilidad de obtener un valor de la convergencia kl negativo, pero
-        ##  esto no debería ser posible, es por esto que utilizamos .clamp(1e-6) para forzar a que ese valor no pueda bajar de un valor cercano a 0 y se
-        ##  mantenga positiva
-        kl_divergence = F.kl_div(log_preds,targets,reduction="none").clamp(1e-6)
+        ##  esto no debería ser posible, es por esto que utilizamos .clamp(0) para forzar a que ese valor no pueda ser negativo
+        kl_divergence = F.kl_div(log_preds,targets,reduction="none").clamp(0)
         # Aplicamos los pesos de las clases en función del batch
         weighted_kl_divergence = kl_divergence*self.class_weights.unsqueeze(0) # Añadimos la dimension de batches a class_weights para la multiplicacion
         
@@ -43,7 +42,7 @@ class WeightedKLDivLoss(nn.Module):
             return weighted_kl_divergence.sum()/log_preds.size(0)
         elif self.reduction == "sum":
             return weighted_kl_divergence.sum()
-        else:
+        elif self.reduction == "mean":
             return weighted_kl_divergence.mean()
 
 
@@ -79,7 +78,7 @@ def calculate_class_weights(dataloader,n_classes=10,smoothing=0.05,device="cpu")
 
 # Función para generar las gráficas del entrenamiento
 def save_graph(history,module,model,fine_tuning=0):
-    # Convertimos a data frame para utilizar seaborn a la hora de crear gráficas
+    # Convertimos a data frame para utilizar plotly a la hora de crear gráficas
     df = pd.DataFrame(history)
     # Agrupamos tanto el error de entrenamiento como el de validación en la misma columna
     df = df.melt(id_vars="epoch",var_name="type", value_name=module)
@@ -131,7 +130,7 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
         return val_mae_loss/len(val_dataloader),val_kl_divergence/len(val_dataloader),class_mae_loss/len(val_dataloader)
 
 
-def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('inf'),patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
+def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
                 device="cpu",fine_tuning=False,callback=None,start_epoch=0):
     # - Función con el bucle de entrenamiento de los modelos -
     min_kl_divergence = float('inf')
@@ -154,7 +153,6 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
     mae_loss_module = nn.L1Loss()
     # Los pesos calculados se usaran tanto en entrenamiento como en validación para asemejar el comportamiento a la inferencia real y usamos un smoothing de 0.05
     #  porque esta a medio camino de 0.1 (que no daba suficiente peso a las clases raras) y 0.01 (que quitaba demasiado peso a las clases comunes)
-
     class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.05,device=device)
     kl_divergence_module = WeightedKLDivLoss(class_weights,reduction="batchmean")
     
@@ -196,6 +194,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
             # Vamos a evitar que las etiquetas tengan el valor exacto 0 para evitar que la divergencia kl colapse
             smooth_labels = data_labels*(1-label_smoothing)+label_smoothing/10
 
+            # Reiniciar los gradientes
+            optimizer.zero_grad()
             # Predicción del modelo que saldrá en forma de logaritmos al usar una LogSoftmax
             log_preds = model(data_inputs)
 
@@ -206,8 +206,6 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
             epoch_mae_loss += mae_loss.item()
             epoch_kl_divergence += kl_divergence.item()
 
-            # Reiniciar los gradientes
-            optimizer.zero_grad()
             # Pasada hacia atrás
             kl_divergence.backward()
             # Actualizar los parámetros
@@ -224,8 +222,10 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
         # Almacenamos los valores de las pérdidas para visualizarlos posteriormente
         history_mae["train_mae"].append(mean_epoch_mae)
         history_mae["val_mae"].append(val_mae_loss)
+
         history_kl["train_kl"].append(mean_epoch_kl)
         history_kl["val_kl"].append(val_kl_divergence)
+        
         for clave,valor in zip(history_class.keys(),class_mae_loss.tolist()):
             history_class[clave].append(valor)
 
@@ -245,10 +245,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,global_min_kl=float('i
             min_kl_divergence = val_kl_divergence
             no_improvement = 0
             mejor_log = current_log
-
-            if val_kl_divergence < global_min_kl:
-                torch.save(model.state_dict(),f"./{model.name}_best_model.pth")
-                global_min_kl = val_kl_divergence
+            torch.save(model.state_dict(),f"./{model.name}_best_model.pth")
         else:
             no_improvement += 1
         print(current_log)
@@ -285,7 +282,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         raise ValueError(f"El tipo de modelo {model_type} no está soportado, elija uno entre ['MRConvolutional','MRConvolutional_Hist,'MRVisionTransformer]")
     
     # Primero entrenamos solo la cabeza del modelo
-    obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,float('inf'),patience1,max_epochs1,lr1,label_smoothing,
+    obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,patience1,max_epochs1,lr1,label_smoothing,
                            device,fine_tuning=False,callback=callback,start_epoch=0)
 
     # --- No hacer fine tuning hasta hasta haber decidido el mejor modelo con la búsqueda de hiperparámetros ---
@@ -305,12 +302,9 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
         if model_name == "ResNet50":
             layers = list(model.model.layer4.parameters())
-        elif model_name in ["ConvNeXt_tiny","EfficientNetV2_small"]:
+        elif model_name in ["ConvNeXt_tiny","EfficientNetV2_small","MobileNet_V3_Large"]:
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
             layers = list(model.model.features[-2:].parameters())
-        # De MobileNet descongelmos algún bloque más por ser mucho más ligera y por eso podemos permitirnoslo
-        elif model_name == "MobileNet_V3_Large":
-            layers = list(model.model.features[-4:].parameters())
         
         # Para los vision transformers
         elif model_name == "ViT_B_16":
@@ -324,7 +318,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
 
         for param in layers:
             param.requires_grad=True
-        obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,obj_loss,patience2,max_epochs2,lr2,label_smoothing,
+        obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,patience2,max_epochs2,lr2,label_smoothing,
                                device,fine_tuning=True,callback=callback,start_epoch=next_epoch)
 
     del model
@@ -337,6 +331,9 @@ def main():
     Desde el main creamos los dataloaders y el modelo correspondiente con los mejores hiperparámetros enconctrados y realizamos el 
     entrenamiento del mismo guardando nuestro mejor modelo que será el que posteriormente exportemos para comparar su eficacia.
     """
+    # Fijamos una semilla para cuando se realice el entrenamiento final
+    torch.manual_seed(67)
+    torch.cuda.manual_seed_all(67)
     # Elegimos la gpu si está disponible y si no la cpu
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -348,11 +345,11 @@ def main():
     # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
     train_dataset_def = CustomImageDataset("./fotos_recortadas",train_def,True)
     val_dataset = CustomImageDataset("./fotos_recortadas",val,True)
-    train_dataloader_def = DataLoader(train_dataset_def, batch_size=64, shuffle=True, pin_memory=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=128, shuffle=False, pin_memory=True)
+    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True)
+    val_dataloader = DataLoader(val_dataset,batch_size=128,shuffle=False,pin_memory=True)
 
-    complete_training("MRVisionTransformer","ViT_B_16","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=4.5e-5,dropout=0.15,fine_tuning=True,
-                      patience1=10,patience2=15,max_epochs1=40,max_epochs2=50,label_smoothing=0.01,device=device)
+    complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=4.5e-5,dropout=0.15,fine_tuning=True,
+                      size1=1024,size2=512,size3=None,patience1=10,patience2=15,max_epochs1=50,max_epochs2=60,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
     main()
