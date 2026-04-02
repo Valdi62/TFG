@@ -76,7 +76,7 @@ def recorte_img(img,puntos,ancho=1000,alto=1000):
     return resultado
 
 
-def crop_pipeline(img_dir,ruta_modelo="Corners_model.pth",dir_salida="fotos_recortadas",revision=False):
+def crop_pipeline(img_dir,ruta_modelo="Corners_EfficientNet_B3_model.pth",dir_salida="fotos_recortadas",revision=False):
     """
     Función completa que utiliza nuestro modelo y recortar las imágenes para quedarnos con el interior de los cuadrados.
     La función construirá el modelo elegido y cargará sus parámetros de un archivo en la variable 'ruta_modelo' que tendremos 
@@ -105,8 +105,8 @@ def crop_pipeline(img_dir,ruta_modelo="Corners_model.pth",dir_salida="fotos_reco
     global img_muestra,puntos
     # Vamos a crear y cargar la configuración de nuestro modelo
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TransferLearning("EfficientNetB3",0.01,550,150).to(device)
-    model.load_state_dict(torch.load(ruta_modelo, map_location=device))
+    model = TransferLearning("EfficientNet_B3",0.4,896,384).to(device)
+    model.load_state_dict(torch.load(ruta_modelo,map_location=device))
 
     # Creamos el dataset con las imágenes del directorio
     names = [n for n in os.listdir(img_dir) if n.endswith((".jpg",".jpeg",".png"))]
@@ -114,7 +114,7 @@ def crop_pipeline(img_dir,ruta_modelo="Corners_model.pth",dir_salida="fotos_reco
     dataset = CustomImageDataset(img_dir,images_names,False)
 
     # Procedemos a etiquetar cada imagen del directorio
-    os.makedirs(dir_salida, exist_ok=True)
+    os.makedirs(dir_salida,exist_ok=True)
     with torch.no_grad():
         model.eval()
         for image,image_name in dataset:

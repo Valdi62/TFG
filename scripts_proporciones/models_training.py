@@ -100,7 +100,6 @@ def save_graph(history,module,model,fine_tuning=0):
 # Bucles de validación
 def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
     # - Función con el bucle de validación -
-
     mae_loss_module = nn.L1Loss()
     kl_divergence_module = nn.KLDivLoss(reduction="batchmean")
 
@@ -110,7 +109,7 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
     with torch.no_grad():
         model.eval()
-        for data_inputs, data_labels in val_dataloader:
+        for data_inputs,data_labels in val_dataloader:
             data_inputs = data_inputs.to(device)
             data_labels = data_labels.to(device)
 
@@ -172,16 +171,23 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     
     # Vamos a implementar una técnica de reducción del learning rate a medida que el modelo va estancandose en el entrenamiento
     # De esta forma cuando se este acercando al mínimo, se podrán ajustar los pesos de forma más precisa para optimizarlos
-    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3))
+    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3),min_lr=1e-7)
 
     # Bucle de entrenamiento
     pbar = tqdm(range(max_epochs))
     for epoch in pbar:
         last_epoch = epoch
+
         # Poner lo que sea necesario del modelo en modo entrenamiento
         model.train()
-        # Pasamos el modelo base a evaluacion para que la batch_normalization de la base sea fija y el dropout se desactive si no estamos haciendo fine_tuning
-        if not fine_tuning:
+        # Pasamos el modelo base a evaluacion para que la batch_normalization de la base sea fija
+        if fine_tuning:
+            # Comprobamos cada modulo de la base para dejar aquellos que esten descongelados en train, pero los que
+            #  sigan congelados se pongan en eval
+            for module in model.model.modules():
+                if not any(i.requires_grad for i in module.parameters()):
+                    module.eval()
+        else:
             model.model.eval()  
 
         epoch_mae_loss = 0
@@ -288,24 +294,16 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
     # --- No hacer fine tuning hasta hasta haber decidido el mejor modelo con la búsqueda de hiperparámetros ---
     # Descongelamos los últimos bloques de los modelos base si queremos hacer un fine tuning adicional
     if fine_tuning:
-        # Borramos el modelo de memoria para después cargar el mejor modelo hasta el momento
-        del model
-        torch.cuda.empty_cache()
-        if model_type == "MRConvolutional":
-            model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
-        elif model_type == "MRConvolutional_Hist":
-            model = MRConvolutionalModelHistogram(model_name,22,dropout,size1,size2,size3).to(device)
-        elif model_type == "MRVisionTransformer":
-            model = MRVisionTransformer(model_name,dropout,size1,size2).to(device)
+        # Cargamos el mejor modelo obtenido de la primera parte del entrenamiento
         model.load_state_dict(torch.load(f"./{model.name}_best_model.pth",map_location=device))
 
-        # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
+        # Para las redes convolucionales
         if model_name == "ResNet50":
             layers = list(model.model.layer4.parameters())
-        elif model_name in ["ConvNeXt_tiny","EfficientNetV2_small","MobileNet_V3_Large"]:
+        elif model_name in ["EfficientNetV2_small","RegNet_Y_3_2GF","ConvNeXt_tiny","ConvNeXt_small"]:
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
             layers = list(model.model.features[-2:].parameters())
-        
+
         # Para los vision transformers
         elif model_name == "ViT_B_16":
             # Descongelamos el último bloque de transformer y la capa de normalización final
@@ -331,7 +329,7 @@ def main():
     Desde el main creamos los dataloaders y el modelo correspondiente con los mejores hiperparámetros enconctrados y realizamos el 
     entrenamiento del mismo guardando nuestro mejor modelo que será el que posteriormente exportemos para comparar su eficacia.
     """
-    # Fijamos una semilla para cuando se realice el entrenamiento final
+    # Fijamos una semilla considerando que las ejecuciones han sido todas realizadas con GPU y no con CPU
     torch.manual_seed(67)
     torch.cuda.manual_seed_all(67)
     # Elegimos la gpu si está disponible y si no la cpu

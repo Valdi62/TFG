@@ -11,7 +11,11 @@ class MRConvolutionalModel(nn.Module):
         super().__init__()
         self.base_model = base_model
         # Cargar el modelo deseado
-        if self.base_model == "ResNet50":
+        if self.base_model == "RegNet_Y_3_2GF":
+            self.model = models.regnet_y_3_2gf(weights=models.RegNet_Y_3_2GF_Weights.IMAGENET1K_V1)
+            self.model.classifier = nn.Identity()
+            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1000,size1))
+        elif self.base_model == "ResNet50":
            self.model  = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
            self.model.fc = nn.Identity()
            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(2048,size1))
@@ -19,6 +23,7 @@ class MRConvolutionalModel(nn.Module):
             self.model = models.efficientnet_v2_s(weights=models.EfficientNet_V2_S_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(1280,size1))
+            
         elif self.base_model == "ConvNeXt_tiny":
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
@@ -28,16 +33,9 @@ class MRConvolutionalModel(nn.Module):
             self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
-        # MobileNet se va a estudiar como una alternativa ligera que pueda ejecutarse en dispositivos móviles para poder realizar un estudio de campo rápido
-        # Se comprobarán sus resultados que normalmente serán peores que los que obtienen los otros modelos, pero si son razonables puede ser una porpuesta interesante
-        # Si se pretende usar aqui un modelo ligero, también habría que usarlo para el recorte de imágenes y poder combinar ambos
-        elif self.base_model == "MobileNet_V3_Large":
-            self.model = models.mobilenet_v3_large(weights=models.MobileNet_V3_Large_Weights.IMAGENET1K_V2)
-            self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Dropout(dropout),nn.Linear(960,size1))
 
         else:
-            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNetV2_small','ConvNeXt_tiny','ConvNeXt_small','MobileNet_V3_Large']")
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['RegNet_Y_3_2GF','ResNet50','EfficientNetV2_small','ConvNeXt_tiny','ConvNeXt_small','MobileNet_V3_Large']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():

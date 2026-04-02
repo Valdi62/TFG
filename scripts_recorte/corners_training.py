@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
-from corners_model import TransferLearning
 from sklearn.metrics import precision_score, recall_score
 from tqdm import tqdm
 import pandas as pd
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
 import plotly.express as px
+from . corners_model import TransferLearning
+from . corners_dataset import CustomImageDataset
 
 
 # Función para generar las gráficas del entrenamiento
@@ -51,7 +53,7 @@ def validation(model,val_dataloader,device="cpu"):
 
     with torch.no_grad():
         model.eval()
-        for data_inputs, data_labels in val_dataloader:
+        for data_inputs,data_labels in val_dataloader:
             corner_trues.extend(data_labels["classification"].numpy())
             data_inputs = data_inputs.to(device)
             data_corners_labels = data_labels["classification"].to(device)
@@ -92,7 +94,7 @@ def validation(model,val_dataloader,device="cpu"):
 
 
 def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,coords_weights=1,corners_weights=1,learning_rate=0.001,
-                device="cpu",fine_tuning=False,callback=None,start_epoch=0):
+                device="cpu",fine_tuning=False,callback=None,start_epoch=0,warmup=5):
     # - Función con el bucle de entrenamiento de clasificación y regresión -
 
     min_objective_loss = float('inf')
@@ -107,7 +109,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         history_bce = {"train_bce":[],"val_bce":[]}
         history_corners = {"accuracy":[],"precision":[],"recall":[]}
 
-    # Como función de pérdida para representar  las coordenadas usamos la MSE loss para penalizar errores grandes
+    # Como función de pérdida para representar  las coordenadas usamos la MSE loss para penalizar errores grandes y porque tras el etiquetado manual de los datos
+    #  no existen muchos outliers
     loss_module_coords = nn.MSELoss()
     # Siempre vamos a comprobar el MAE de las coordenadas en training
     # Como la mae solo la vamos a mostrar podemos calcular la suma de todos los ejemplos solo de la clase positiva y luego dividir directamente entre el total de estos
@@ -131,17 +134,24 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
 
     # Vamos a implementar una técnica de reducción del learning rate a medida que el modelo va estancandose en el entrenamiento
     # De esta forma cuando se este acercando al mínimo, se podrán ajustar los pesos de forma más precisa para optimizarlos
-    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3))
+    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3),min_lr=1e-6)
 
     # Bucle de entrenamiento
     pbar = tqdm(range(max_epochs))
     for epoch in pbar:
         last_epoch = epoch
+
         # Poner lo que sea necesario del modelo en modo entrenamiento
         model.train()
-        if not fine_tuning:
-            model.model.eval()  
-        # Pasamos el modelo base a evaluacion para que la batch_normalization de la base sea fija y el dropout se desactive si no estamos haciendo fine_tuning
+        # Pasamos el modelo base a evaluacion para que la batch_normalization de la base sea fija
+        if fine_tuning:
+            # Comprobamos cada modulo de la base para dejar aquellos que esten descongelados en train, pero los que sigan congelados se pongan en eval
+            # Adicionalmente el batch normalization de la base lo vamos a mantener siempre congelado para que no se modifique y se estropee
+            for module in model.model.modules():
+                if not any(i.requires_grad for i in module.parameters()):
+                    module.eval()
+        else:
+            model.model.eval()
 
         total_positives = 0
         epoch_corners_loss = 0
@@ -149,7 +159,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         epoch_mae_loss = 0
         epoch_total_loss = 0
 
-        for data_inputs, data_labels in train_dataloader:
+        for data_inputs,data_labels in train_dataloader:
             # Hacer una pasada hacia delante
             data_inputs = data_inputs.to(device)
             data_corners_labels = data_labels["classification"].to(device)
@@ -185,13 +195,16 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
             
             # Pasada hacia atrás
             total_loss.backward()
+
             # Actualizar los parámetros
             optimizer.step()
 
         # Calcular las métricas de validación
         accuracy,precision,recall,val_corners_loss,val_coords_loss,val_coords_mae = validation(model,val_dataloader,device)
+
         # Comparamos el MAE de cada combinación porque es lo más intuitivo y fácil de interpretar
-        objective_loss = val_coords_mae + (1-precision)
+        # Le damos más peso a la regresión porque es la tarea más complicada y precisa
+        objective_loss = 3*val_coords_mae + val_corners_loss
 
         # Caculamos las pérdidas de entrenamiento promedio para esta etapa
         mean_epoch_coords_loss = epoch_coords_loss/max(1,total_positives)
@@ -215,8 +228,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         # Actualizamos con la objective loss nuestro scheduler que controla cuando se reduce el learning rate
         scheduler.step(objective_loss)
 
-        current_log=("Training corners Loss %0.4f, Validation corners Loss %0.4f, has_corners accuracy %0.2f%%, has_corners precision %0.2f%%, has_corners recall %0.2f%% \n"
-                    "Patience: %d/%d, Training coords Loss %0.4f, Training MAE Loss %0.4f, Validation coords Loss %0.4f, Validation MAE loss %0.4f, Total Train Loss %0.4f, Objective loss %0.4f " % 
+        current_log=("\nTraining corners Loss %0.4f, Validation corners Loss %0.4f, has_corners accuracy %0.2f%%, has_corners precision %0.2f%%, has_corners recall %0.2f%% \n"
+                    "Patience: %d/%d, Training coords Loss %0.4f, Training MAE Loss %0.4f, Validation coords Loss %0.4f, Validation MAE loss %0.4f, Total Train Loss %0.4f, Objective loss %0.4f" % 
                     (mean_epoch_corner_loss, val_corners_loss, accuracy*100, precision*100, recall*100,no_improvement, patience,
                     mean_epoch_coords_loss, mean_epoch_mae, val_coords_loss,val_coords_mae,epoch_total_loss/len(train_dataloader),objective_loss))
 
@@ -230,7 +243,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
             mejor_log=current_log
             torch.save(model.state_dict(),f"./{model.name}_model.pth")
         else:
-            no_improvement += 1
+            if epoch >= warmup:
+                no_improvement += 1
 
         print(current_log)
 
@@ -256,30 +270,31 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
 
 
 # Funcion del entrenamiento completo para realizar las dos etapas diferentes
-def complete_training_crop(model_name,opt_name,train_dataloader,val_dataloader,coords_weights=1,corners_weights=1,lr1=0.001,lr2=0.00001,dropout=0.2,
+def complete_training_crop(model_name,opt_name,train_dataloader,val_dataloader,coords_weights=1,corners_weights=1,lr1=1e-3,lr2=1e-5,dropout=0.2,
                     size1=512,size2=128,patience1=10,patience2=10,max_epochs1=20,max_epochs2=40,fine_tuning=False,device="cpu",callback=None):
     torch.cuda.empty_cache()
+    
     # Llamamos a la función que crea el modelo
     model = TransferLearning(model_name,dropout,size1,size2).to(device)
-    
+
     # Primero entrenamos solo la cabeza del modelo
     obj_loss,next_epoch = train_model(model,opt_name,train_dataloader,val_dataloader,patience1,max_epochs1,coords_weights,corners_weights,
                                       lr1,device,fine_tuning=False,callback=callback,start_epoch=0)
 
     # Descongelamos los últimos bloques de los modelos base si queremos hacer un fine tuning adicional
     if fine_tuning:
-        # Borramos el modelo de memoria para después cargar el mejor modelo hasta el momento
-        del model
-        torch.cuda.empty_cache()
-        model = TransferLearning(model_name,dropout=0.4,size1=512,size2=128).to(device)
+        # Cargamos el mejor modelo de la primera parte del entrenamiento
         model.load_state_dict(torch.load(f"./{model.name}_model.pth",map_location=device))
 
         # Para los modelos no elegidos solo ofrecemos un fine tuning descongelando el último bloque
         if model_name == "ResNet50":
             layers = list(model.model.layer4.parameters())
-        elif model_name in ["ConvNeXt_tiny","EfficientNet_B3","MobileNet_V3_Large"]:
-            # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
+        elif model_name in ["ConvNeXt_tiny","MobileNet_V3_Large"]:
+            # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último convolucional
             layers = list(model.model.features[-2:].parameters())
+        # Como este el modelo ganador de la busqueda de hiperparametros vamos a descongelar alguna capa adicional para comprobar si se obtiene mejor rendimiento  
+        elif model_name == "EfficientNet_B3":
+            layers = list(model.model.features[-3:].parameters())
 
         for param in layers:
             param.requires_grad=True
@@ -291,15 +306,66 @@ def complete_training_crop(model_name,opt_name,train_dataloader,val_dataloader,c
     return obj_loss
 
 
+"""
+Después de realizar multiples pruebas relacionadas con los últimos bloques del modelo base extraemos conlcuiones.
+En el conjunto de Test
+Primera prueba - modelo base congelado y solo entrenamos la cabeza
+Test Corners BCE 0.1753, Test MSE 0.0031, Test MAE 0.0424
+Accuracy 98.88%, Precision 98.82%, Recall 100.00%
+
+Segunda prueba - primera fase con el modelo base congelado y una segunda fase donde se descongela las últimas capas del modelo base
+Test Corners BCE 0.1311, Test MSE 0.0032, Test MAE 0.0431
+Accuracy 98.88%, Precision 98.82%, Recall 100.00%
+
+Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
+Test Corners BCE 0.1605, Test MSE 0.0008, Test MAE 0.0175
+Accuracy 98.88%, Precision 98.82%, Recall 100.00%
+
+Parece que empezar con esas capas ya descongeladas y entrenar directamente el modelo completo es mejor que dividirlo en dos fases,
+aunque la bce sea un poco peor de esta forma, no parece impactar tanto a las medidas de precisión y la perdida de regresión es mucho mejor.
+"""
+
 def main():
     """
     Desde el main creamos los dataloaders y el modelo correspondiente con los mejores hiperparámetros enconctrados y realizamos el 
     entrenamiento del mismo guardando nuestro mejor modelo que será el que posteriormente exportemos y utilicemos para realizar la 
     clasificación y el recorte de todas las imágenes.
     """
-    # Fijamos una semilla para cuando se realice el entrenamiento final
+    # Fijamos una semilla considerando que las ejecuciones han sido todas realizadas con GPU y no con CPU
     torch.manual_seed(67)
     torch.cuda.manual_seed_all(67)
+
+    # Elegimos la gpu si está disponible y si no la cpu
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Cargamos en data frames los conjuntos de datos ya divididos
+    train = pd.read_csv("./dataset_dividido/train_crop.csv")
+    val = pd.read_csv("./dataset_dividido/val_crop.csv")
+
+    # Creamos los datasets y dataloaders que vamos a usar para entrenar y validar
+    train_dataset = CustomImageDataset("./1_photos",train,True)
+    val_dataset = CustomImageDataset("./1_photos",val,True)
+    train_dataloader = DataLoader(train_dataset,batch_size=16,shuffle=True,pin_memory=True)
+    val_dataloader = DataLoader(val_dataset,batch_size=32,shuffle=False,pin_memory=True)
+
+    # Definimos el modelo ganador con los valores que mejor funcionan
+    model = TransferLearning("EfficientNet_B3",0.4,896,384).to(device)
+    # Descongelamos sus últimas capas
+    layers = list(model.model.features[-3:].parameters())
+    for param in layers:
+        param.requires_grad=True
     
+    # Realizamos el entrenamiento del modelo primero con el conjunto de train y val para comprobar su rendimiento en test
+    train_model(model,"AdamW",train_dataloader,val_dataloader,patience=30,max_epochs=120,coords_weights=10,corners_weights=1,
+                learning_rate=1e-3,device=device,fine_tuning=True)
+    
+
 if __name__ == "__main__":
     main()
+
+"""
+Evaluación final
+
+Test Corners BCE 0.1605, Test MSE 0.0008, Test MAE 0.0175
+Accuracy 98.88%, Precision 98.82%, Recall 100.00%
+"""

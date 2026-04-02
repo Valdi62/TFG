@@ -20,7 +20,6 @@ class TransferLearning(nn.Module):
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
-        # Si queremos que los modelos se puedan ejecutar de forma agil en dispositivos móviles para estudios de campo, este modelo ligero puede ser una buena alternativa
         elif self.base_model == "MobileNet_V3_Large":
             self.model = models.mobilenet_v3_large(weights=models.MobileNet_V3_Large_Weights.IMAGENET1K_V2)
             self.model.classifier = nn.Identity()
@@ -58,5 +57,5 @@ class TransferLearning(nn.Module):
     
     @property
     def name(self):
-        return f"Crop_{self.base_model}"
+        return f"Corners_{self.base_model}"
 
