@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torchvision import models
 from . HardHistogramBatched import HardHistogramBatched
+from . HardHistogram import HardHistogram
 
 # --- MR = MultivariateRegression ---
 
@@ -28,7 +29,6 @@ class MRConvolutionalModel(nn.Module):
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
-        # La familia ganadora es ConvNeXt por tanto exploramos un modelo algo mas potente para comprobar si merece la pena    
         elif self.base_model == "ConvNeXt_small":
             self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
@@ -50,11 +50,10 @@ class MRConvolutionalModel(nn.Module):
                                     nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
                                    
 
-    def forward(self, x):
+    def forward(self,x):
         x = self.model(x)
         x = self.head(x)
-        x = self.layers(x)
-        return x
+        return self.layers(x)
 
     @property
     def name(self):
@@ -64,57 +63,70 @@ class MRConvolutionalModel(nn.Module):
 
 # 2. Red Neuronal clásica de multiregresión que usa una red convolucional como base y una capa con histogramas a la salida de la base
 class MRConvolutionalModelHistogram(nn.Module):
-    def __init__(self,base_model,num_bins=32,dropout=0.2,size1=1024,size2=512,size3=128):
+    def __init__(self,base_model,num_bins=32,dropout=0.2,size1=1024,size2=512):
         super().__init__()
         self.base_model = base_model
         self.num_bins = num_bins
 
-        # Cargar el modelo deseado
-        # El modelo usa la misma base que el anterior pero usa una capa de histograma adicional después de la cabeza del modelo base
+        # Instanciamos la capa de histograma
+        self.histogram = HardHistogramBatched(n_features=3,num_bins=self.num_bins)
+        # Instanciamos un conjunto de capas para preparar la salida del histograma para poder concatenarla con la salida normal de la red
+        self.out_channels = 3*num_bins
+        self.hist_proj = nn.Sequential(nn.Linear(self.out_channels,size2),
+                                       nn.ReLU(),
+                                       nn.Dropout(dropout))
+
+        # Cargar el modelo base deseado
         if self.base_model == "ConvNeXt_tiny":
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
-            self.model.avgpool = nn.Identity() # Eliminamos también la capa de pooling global antes de la capa de histograma
             self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Flatten(2),                                    
-                                      HardHistogramBatched(768,self.num_bins),
-                                      nn.Dropout(dropout),
-                                      nn.Linear(768*self.num_bins,size1),
-                                      nn.ReLU())
-        elif self.base_model == "ConvNeXt_small":
-            self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
-            self.model.avgpool = nn.Identity() # Eliminamos también la capa de pooling global antes de la capa de histograma
-            self.model.classifier = nn.Identity()
-            self.head = nn.Sequential(nn.Flatten(2),                                    
-                                      HardHistogramBatched(768,self.num_bins),
-                                      nn.Dropout(dropout),
-                                      nn.Linear(768*self.num_bins,size1),
-                                      nn.ReLU())         
-
+            self.head = nn.Sequential(nn.Flatten(),nn.Dropout(dropout),nn.Linear(768,size1))
         else:
-            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ConvNeXt_tiny','ConvNeXt_small']")
+            raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ConvNeXt_tiny']")
 
         # Congelar todos los pesos del modelo pre-entrenado inicialmente
         for param in self.model.parameters():
             param.requires_grad = False              
 
-        self.layers = nn.Sequential(nn.Dropout(dropout),
+        self.layers = nn.Sequential(nn.ReLU(),
+                                    nn.Dropout(dropout),
                                     nn.Linear(size1,size2),
                                     nn.ReLU(),
-
-                                    nn.Dropout(dropout),
-                                    nn.Linear(size2,size3),
-                                    nn.ReLU(),
+                                    nn.Dropout(dropout))
                                     
-                                    nn.Dropout(dropout),
-                                    nn.Linear(size3,10),
-                                    nn.LogSoftmax(dim=1) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
-                                   )
+        self.output = nn.Sequential(nn.Linear(size2+size2,10),
+                                    nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
+        
 
-    def forward(self, x):
-        x = self.model(x)
-        x = self.head(x)
-        x = self.layers(x)
-        return x
+    def forward(self,x):
+        ## Pasada por la red convolucional ##
+        x_conv = self.model(x)
+        x_conv = self.head(x_conv)
+        x_conv = self.layers(x_conv)
+
+
+        ## Pasada por la capa de hitograma ##
+        # Para aplicar la capa de histograma podemos reducir el tamño general de las imágenes para que no se agote la memoria por las operaciones
+        # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles de la imagen original
+        x_reduced = nn.functional.interpolate(x,size=(128,128),mode='bilinear',align_corners=False)
+        # Combinamos las dimensiones de alto y ancho en una sola porque la capa de histograma espera una entrada 2D
+        x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
+        # Calculamos el menor y mayor valor de cada canal de la imagen
+        x_min = x_reduced.min(dim=2,keepdim=True).values
+        x_max = x_reduced.max(dim=2,keepdim=True).values
+
+        # Normalizamos las entradas entre 0 y 1, añadimos 1e-8 para evitar la división por 0
+        x_norm = (x_reduced-x_min)/(x_max-x_min+1e-8)
+        # Reordenamos las dimensiones para que el número de canales sea la última ya que es lo que espera la capa de histograma
+        x_norm = x_norm.permute(0,2,1)
+        # Aplicamos la capa de histograma y las capas para preparar la salida
+        x_hist = self.histogram(x_norm)
+        x_hist = self.hist_proj(x_hist)
+
+        # Concatenamos la salida de la red con la salida del histograma (Igual hay una forma mejor de concatenar)
+        x_def = torch.cat([x_conv,x_hist],dim=1)
+        return self.output(x_def)
+
 
     @property
     def name(self):
@@ -158,11 +170,10 @@ class MRVisionTransformer(nn.Module):
                                     nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
                                    
 
-    def forward(self, x):
+    def forward(self,x):
         x = self.model(x)
         x = self.head(x)
-        x = self.layers(x)
-        return x
+        return self.layers(x)
 
     @property
     def name(self):

@@ -345,8 +345,8 @@ def main():
     # Creamos los datasets y dataloaders que vamos a usar para entrenar y validar
     train_dataset = CustomImageDataset("./1_photos",train,True)
     val_dataset = CustomImageDataset("./1_photos",val,True)
-    train_dataloader = DataLoader(train_dataset,batch_size=16,shuffle=True,pin_memory=True)
-    val_dataloader = DataLoader(val_dataset,batch_size=32,shuffle=False,pin_memory=True)
+    train_dataloader = DataLoader(train_dataset,batch_size=16,shuffle=True,pin_memory=True,num_workers=2)
+    val_dataloader = DataLoader(val_dataset,batch_size=32,shuffle=False,pin_memory=True,num_workers=2)
 
     # Definimos el modelo ganador con los valores que mejor funcionan
     model = TransferLearning("EfficientNet_B3",0.4,896,384).to(device)

@@ -130,7 +130,7 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
 
 def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
-                device="cpu",fine_tuning=False,callback=None,start_epoch=0):
+                device="cpu",fine_tuning=False,callback=None,start_epoch=0,warmup=5):
     # - Función con el bucle de entrenamiento de los modelos -
     min_kl_divergence = float('inf')
     no_improvement = 0
@@ -239,7 +239,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         scheduler.step(val_kl_divergence)
         
         # Mostramos los valores de las métricas durante el entrenamiento incluyendo el MAE que solo se utiliza para visualizar el error
-        current_log=("Training WeightedKL Divergence: %.4f, Validation KL Divergence: %.4f, Training MAE Loss: %.4f, Validation MAE Loss: %.4f, Patience: %d/%d\n"
+        current_log=(" Training WeightedKL Divergence: %.4f, Validation KL Divergence: %.4f, Training MAE Loss: %.4f, Validation MAE Loss: %.4f, Patience: %d/%d\n"
                      "Validation classes MAE: {%s}"% 
                     (mean_epoch_kl,val_kl_divergence,mean_epoch_mae,val_mae_loss,no_improvement,patience,class_mae))
         
@@ -253,7 +253,9 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
             mejor_log = current_log
             torch.save(model.state_dict(),f"./{model.name}_best_model.pth")
         else:
-            no_improvement += 1
+            if epoch >= warmup:
+                no_improvement += 1
+
         print(current_log)
         if no_improvement >= patience:
             print("No hay mejora por %d épocas. Parada Temprana!!" % patience)
@@ -274,14 +276,14 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
 
 
 # Funcion del entrenamiento completo para realizar las dos etapas diferentes
-def complete_training(model_type,model_name,opt_name,train_dataloader,val_dataloader,lr1=0.001,lr2=0.00001,dropout=0.2,fine_tuning=False,
-                      size1=1024,size2=512,size3=128,patience1=5,patience2=10,max_epochs1=25,max_epochs2=40,label_smoothing=0.01,device="cpu",callback=None):
+def complete_training(model_type,model_name,opt_name,train_dataloader,val_dataloader,lr1=1e-3,lr2=1e-5,dropout=0.2,fine_tuning=False,
+                      size1=1024,size2=512,patience1=5,patience2=10,max_epochs1=25,max_epochs2=40,label_smoothing=0.01,device="cpu",callback=None):
     torch.cuda.empty_cache()
     # Llamamos a la función que crea el modelo
     if model_type == "MRConvolutional":
         model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
     elif model_type == "MRConvolutional_Hist":
-        model = MRConvolutionalModelHistogram(model_name,22,dropout,size1,size2,size3).to(device)
+        model = MRConvolutionalModelHistogram(model_name,32,dropout,size1,size2).to(device)
     elif model_type == "MRVisionTransformer":
         model = MRVisionTransformer(model_name,dropout,size1,size2).to(device)
     else:
@@ -324,6 +326,24 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
     return obj_loss
 
 
+"""
+Después de realizar multiples pruebas relacionadas con los últimos bloques del modelo base (cuando usamos CNNs) extraemos concluiones.
+En el conjunto de Test
+Primera prueba - modelo base congelado y solo entrenamos la cabeza
+    Divergencia KL: 0.2967 , MAE Loss: 0.0397
+    MAE por clases: 0.0737 | 0.0078 | 0.025 | 0.1254 | 0.052 | 0.0077 | 0.0721 | 0.015 | 0.008 | 0.0099
+
+Segunda prueba - primera fase con el modelo base congelado y una segunda fase donde se descongela las últimas capas del modelo base
+    Divergencia KL: 0.2814 , MAE Loss: 0.0375
+    MAE por clases: 0.0698 | 0.007 | 0.0222 | 0.1157 | 0.0533 | 0.0083 | 0.0682 | 0.0136 | 0.0085 | 0.0088
+
+Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
+Divergencia KL: 0.3731 , MAE Loss: 0.0497
+MAE por clases: 0.0855 | 0.0112 | 0.0247 | 0.1593 | 0.0884 | 0.0121 | 0.0753 | 0.0176 | 0.0072 | 0.0151
+
+Parece en este caso es mejor entrenar la cabeza y luego ya descongelar las últimas capas para hacer algún ajuste
+"""
+
 def main():
     """
     Desde el main creamos los dataloaders y el modelo correspondiente con los mejores hiperparámetros enconctrados y realizamos el 
@@ -343,11 +363,44 @@ def main():
     # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
     train_dataset_def = CustomImageDataset("./fotos_recortadas",train_def,True)
     val_dataset = CustomImageDataset("./fotos_recortadas",val,True)
-    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True)
-    val_dataloader = DataLoader(val_dataset,batch_size=128,shuffle=False,pin_memory=True)
+    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=2)
+    val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=2)
 
-    complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=4.5e-5,dropout=0.15,fine_tuning=True,
-                      size1=1024,size2=512,size3=None,patience1=10,patience2=15,max_epochs1=50,max_epochs2=60,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=2e-3,lr2=2e-5,dropout=0.2,fine_tuning=False,
+                      size1=1152,size2=384,size3=None,patience1=15,patience2=30,max_epochs1=50,max_epochs2=120,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
     main()
+
+"""
+BASE CONVOLUCIONAL SIN HISTOGRAMA (DOS BLOQUES):
+    Divergencia KL: 0.2814 , MAE Loss: 0.0375
+    MAE por clases: 0.0698 | 0.007 | 0.0222 | 0.1157 | 0.0533 | 0.0083 | 0.0682 | 0.0136 | 0.0085 | 0.0088
+
+BASE CONVOLUCIONAL SIN HISTOGRAMA (TRES BLOQUES):
+
+
+BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
+
+
+
+(Para usar la capa de histograma sin que se agote la memoria hay dos formas principales:
+ - Reducir batch_size
+ - Reducir la resolución de las imágenes
+        ¡¡¡ Es buena idea entrenar con una resolución reducida pero luego predecir con la resolución clásica, o es mejor intentar mantener en ambos casos la misma resolución !!!
+
+ Para reducir el tiempo de ejecución hay tres formas principales:
+ - Reducir la resolución de las imágenes
+ - Reducir el num_bins
+ - Aumentar el batch_size
+)
+
+ -------------Comparativa de las dos posibles capas de histograma-------------------
+Capa histograma batched - 47 mins
+    Divergencia KL: 0.2880 , MAE Loss: 0.0400
+    MAE por clases: 0.0752 | 0.0078 | 0.0229 | 0.1219 | 0.0574 | 0.008 | 0.0734 | 0.0138 | 0.01 | 0.0099
+
+Capa histograma sin batched - 67 mins
+    Divergencia KL: 0.3022 , MAE Loss: 0.0388
+    MAE por clases: 0.0744 | 0.0064 | 0.0186 | 0.1224 | 0.0576 | 0.0049 | 0.074 | 0.0125 | 0.0099 | 0.0075 
+"""

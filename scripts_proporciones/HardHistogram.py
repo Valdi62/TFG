@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 
-class HardHistogramBatched(nn.Module):
+class HardHistogram(nn.Module):
 
     """This class computes a histogram based in convolutional layers. I have followed the paper.
     Yusuf, Ibrahim, George Igwegbe, and Oluwafemi Azeez. "Differentiable Histogram with Hard-Binning."
@@ -13,7 +13,7 @@ class HardHistogramBatched(nn.Module):
     def __init__(self, n_features, num_bins, quantiles=False):
 
         # inherit nn.module
-        super(HardHistogramBatched, self).__init__()
+        super(HardHistogram, self).__init__()
 
         # The number of features will be the number of channels to use in the convolution
         self.in_channels = n_features
@@ -63,11 +63,30 @@ class HardHistogramBatched(nn.Module):
         if len(input.shape) == 2:
             input = input.unsqueeze(0)
         result = torch.empty((input.shape[0], self.num_bins * self.in_channels), device=input.device)
-        # Histograms work with batches of samples
-        tens = self.bin_centers_conv(input.mT)
-        tens = torch.abs(tens)
-        tens = self.bin_widths_conv(tens)
-        tens = torch.pow(1.01, tens)
-        tens = self.threshold(tens)
-        result = torch.mean(tens, dim=2)
+        # Histograms do not work with batches of samples, process sample by sample
+        for i, sample in enumerate(input):
+            # Pass through first convolution to learn bin centers: |x-center|
+            sample = self.bin_centers_conv(sample.transpose(0, 1).unsqueeze(0))
+
+            # Absolute value
+            sample = torch.abs(sample)
+
+            # Second convolution
+            sample = self.bin_widths_conv(sample)
+
+            # Exponentiation
+            sample = torch.pow(1.01, sample)
+
+            # Thresholding
+            sample = self.threshold(sample)
+
+            # Gloval average pooling
+            # input = self.hist_pool(input)
+            sample = torch.mean(sample, dim=2)
+
+            if self.quantiles:
+                sample = sample.view(-1, self.num_bins).cumsum(dim=1)
+
+            # The output is a Tensor with size n_bins*n_features
+            result[i, :] = sample.flatten()
         return result
