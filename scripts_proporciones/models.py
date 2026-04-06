@@ -70,7 +70,7 @@ class MRConvolutionalModelHistogram(nn.Module):
 
         # Instanciamos la capa de histograma
         self.histogram = HardHistogramBatched(n_features=3,num_bins=self.num_bins)
-        # Instanciamos un conjunto de capas para preparar la salida del histograma para poder concatenarla con la salida normal de la red
+        # Instanciamos un conjunto de capas para preparar la salida del histograma y poder concatenarla con la salida normal de la red
         self.out_channels = 3*num_bins
         self.hist_proj = nn.Sequential(nn.Linear(self.out_channels,size2),
                                        nn.ReLU(),
@@ -84,7 +84,7 @@ class MRConvolutionalModelHistogram(nn.Module):
         else:
             raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ConvNeXt_tiny']")
 
-        # Congelar todos los pesos del modelo pre-entrenado inicialmente
+        # Congelar todos los pesos del modelo base pre-entrenado inicialmente
         for param in self.model.parameters():
             param.requires_grad = False              
 
@@ -104,29 +104,27 @@ class MRConvolutionalModelHistogram(nn.Module):
         x_conv = self.head(x_conv)
         x_conv = self.layers(x_conv)
 
-
-        ## Pasada por la capa de hitograma ##
-        # Para aplicar la capa de histograma podemos reducir el tamño general de las imágenes para que no se agote la memoria por las operaciones
-        # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles de la imagen original
+        ## Preprocesado de la entrada para poder pasar por la capa de histograma
+        # Para aplicar la capa de histograma podemos reducir el tamaño general de las imágenes para que no se agote la memoria por las operaciones
+        # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles cercanos en la imagen original
         x_reduced = nn.functional.interpolate(x,size=(128,128),mode='bilinear',align_corners=False)
-        # Combinamos las dimensiones de alto y ancho en una sola porque la capa de histograma espera una entrada 2D
+        # Combinamos las dimensiones de alto y ancho al final para aplanar la imagen
         x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
         # Calculamos el menor y mayor valor de cada canal de la imagen
         x_min = x_reduced.min(dim=2,keepdim=True).values
         x_max = x_reduced.max(dim=2,keepdim=True).values
-
         # Normalizamos las entradas entre 0 y 1, añadimos 1e-8 para evitar la división por 0
         x_norm = (x_reduced-x_min)/(x_max-x_min+1e-8)
-        # Reordenamos las dimensiones para que el número de canales sea la última ya que es lo que espera la capa de histograma
-        x_norm = x_norm.permute(0,2,1)
-        # Aplicamos la capa de histograma y las capas para preparar la salida
+        # Intercambiamos las dos últimas dimensiones porque luego la capa de histograma las vuelve a intercambiar y las dejará correctamente
+        x_norm = x_norm.mT
+
+        ## Pasada por la capa de Histograma ##
         x_hist = self.histogram(x_norm)
         x_hist = self.hist_proj(x_hist)
 
-        # Concatenamos la salida de la red con la salida del histograma (Igual hay una forma mejor de concatenar)
+        # Concatenamos la salida de la red con la salida del histograma (Revisar)
         x_def = torch.cat([x_conv,x_hist],dim=1)
         return self.output(x_def)
-
 
     @property
     def name(self):

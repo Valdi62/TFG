@@ -130,7 +130,7 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
 
 def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
-                device="cpu",fine_tuning=False,callback=None,start_epoch=0,warmup=5):
+                device="cpu",fine_tuning=False,callback=None,start_epoch=0,warmup=8):
     # - Función con el bucle de entrenamiento de los modelos -
     min_kl_divergence = float('inf')
     no_improvement = 0
@@ -171,7 +171,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     
     # Vamos a implementar una técnica de reducción del learning rate a medida que el modelo va estancandose en el entrenamiento
     # De esta forma cuando se este acercando al mínimo, se podrán ajustar los pesos de forma más precisa para optimizarlos
-    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.1,patience=round(2*patience/3),min_lr=1e-7)
+    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.3,patience=patience//2,min_lr=1e-7)
 
     # Bucle de entrenamiento
     pbar = tqdm(range(max_epochs))
@@ -304,7 +304,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
             layers = list(model.model.layer4.parameters())
         elif model_name in ["EfficientNetV2_small","RegNet_Y_3_2GF","ConvNeXt_tiny","ConvNeXt_small"]:
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
-            layers = list(model.model.features[-2:].parameters())
+            layers = list(model.model.features[-4:].parameters())
 
         # Para los vision transformers
         elif model_name == "ViT_B_16":
@@ -334,8 +334,8 @@ Primera prueba - modelo base congelado y solo entrenamos la cabeza
     MAE por clases: 0.0737 | 0.0078 | 0.025 | 0.1254 | 0.052 | 0.0077 | 0.0721 | 0.015 | 0.008 | 0.0099
 
 Segunda prueba - primera fase con el modelo base congelado y una segunda fase donde se descongela las últimas capas del modelo base
-    Divergencia KL: 0.2814 , MAE Loss: 0.0375
-    MAE por clases: 0.0698 | 0.007 | 0.0222 | 0.1157 | 0.0533 | 0.0083 | 0.0682 | 0.0136 | 0.0085 | 0.0088
+    Divergencia KL: 0.2449 , MAE Loss: 0.0350
+    MAE por clases: 0.0697 | 0.0075 | 0.0196 | 0.1105 | 0.047 | 0.0084 | 0.0549 | 0.0154 | 0.008 | 0.0087
 
 Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
 Divergencia KL: 0.3731 , MAE Loss: 0.0497
@@ -366,18 +366,26 @@ def main():
     train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=2)
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=2)
 
-    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=2e-3,lr2=2e-5,dropout=0.2,fine_tuning=False,
-                      size1=1152,size2=384,size3=None,patience1=15,patience2=30,max_epochs1=50,max_epochs2=120,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=2e-3,lr2=1e-5,dropout=0.2,fine_tuning=True,
+                      size1=1152,size2=384,patience1=15,patience2=30,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
     main()
 
 """
 BASE CONVOLUCIONAL SIN HISTOGRAMA (DOS BLOQUES):
-    Divergencia KL: 0.2814 , MAE Loss: 0.0375
-    MAE por clases: 0.0698 | 0.007 | 0.0222 | 0.1157 | 0.0533 | 0.0083 | 0.0682 | 0.0136 | 0.0085 | 0.0088
+# Logica antigua de scheduler (paciencia 1/3 y creo que era factor=0.1) y 5e-5 lr:
+    Divergencia KL: 0.2449 , MAE Loss: 0.0350
+    MAE por clases: 0.0697 | 0.0075 | 0.0196 | 0.1105 | 0.047 | 0.0084 | 0.0549 | 0.0154 | 0.008 | 0.0087
 
-BASE CONVOLUCIONAL SIN HISTOGRAMA (TRES BLOQUES):
+# Nueva logica de scheduler y 3e-5 lr:
+    Divergencia KL: 0.2461 , MAE Loss: 0.0363
+    MAE por clases: 0.0731 | 0.0088 | 0.02 | 0.1157 | 0.048 | 0.0081 | 0.0568 | 0.0163 | 0.007 | 0.0094
+
+# Nueva logica de scheduler y 6e-6 lr:
+
+BASE CONVOLUCIONAL SIN HISTOGRAMA (CUATRO BLOQUES):
+# Nueva logica de scheduler y 1e-5 lr:
 
 
 BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
