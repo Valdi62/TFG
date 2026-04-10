@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau,CosineAnnealingLR
 import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import DataLoader
 import plotly.express as px
-from . models import MRConvolutionalModel,MRConvolutionalModelHistogram,MRVisionTransformer
+from . models import MRConvolutionalModel,MRVisionTransformer
 from . create_dataset import CustomImageDataset
+import random
 
 
 # Divergencia KL ponderada
@@ -55,7 +56,7 @@ def calculate_class_weights(dataloader,n_classes=10,smoothing=0.05,device="cpu")
         'dataloader' - dataloader con los ejemplos de donde sacamos las frecuencias
         'n_classes'  - número total de clases diferentes
         'smoothing'  - valor que controla la relación de pesos:
-                          * smoothing = 0 -> se equilibran los pesos para que al considerar todos los ejemplos las clases tengan importancia equitativa
+                          * smoothing = 0 -> se equilibran los pesos para que al considerar todos los ejemplos las clases tengan la misma importancia relativa a su frecuencia
                           * smoothing > 0 -> controla la relación de pesos entre las clases, a menor valor más importancia tendrán las clases infrecuentes
     """
     class_sums = torch.zeros(n_classes).to(device)
@@ -130,7 +131,7 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
 
 def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=30,learning_rate=0.001,label_smoothing=0.01,
-                device="cpu",fine_tuning=False,callback=None,start_epoch=0,warmup=8):
+                device="cpu",fine_tuning=False,callback=None,start_epoch=0,warmup=5):
     # - Función con el bucle de entrenamiento de los modelos -
     min_kl_divergence = float('inf')
     no_improvement = 0
@@ -150,28 +151,27 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     # Adicionalmente se calcula el MAE para mostrar por pantalla puesto que es más fácil de interpretar
     # Utilizaremos una clase personalizada de la función divergencia KL con pesos para las clases
     mae_loss_module = nn.L1Loss()
-    # Los pesos calculados se usaran tanto en entrenamiento como en validación para asemejar el comportamiento a la inferencia real y usamos un smoothing de 0.05
-    #  porque esta a medio camino de 0.1 (que no daba suficiente peso a las clases raras) y 0.01 (que quitaba demasiado peso a las clases comunes)
-    class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.05,device=device)
+    # El valor del smoothing es importante ajustarlo para que le dé peso a las clases raras pero no ignore las clases comunes por culpa de esto
+    class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.2,device=device)
     kl_divergence_module = WeightedKLDivLoss(class_weights,reduction="batchmean")
-    
+
     # Vamos a filtrar los parámetros que no están congelados para solo pasarle los que sean estrictamente necesarios al optimizador
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     # Elegimos el optimizador deseado con su learning rate
     if opt == "SGD":
         optimizer = torch.optim.SGD(trainable_params,lr=learning_rate,momentum=0.9)
     elif opt == "AdamW":
-        optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
+        optimizer = torch.optim.AdamW(trainable_params,lr=learning_rate,weight_decay=0.05)
     elif opt == "RMSprop":
-        optimizer = torch.optim.RMSprop(trainable_params, lr=learning_rate)
+        optimizer = torch.optim.RMSprop(trainable_params,lr=learning_rate)
     elif opt == "Adam":
-        optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
+        optimizer = torch.optim.Adam(trainable_params,lr=learning_rate)
     else:
         raise ValueError(f"El optimizado {opt} no está soportado, elija uno entre ['SGD','AdamW','Adam','RMSprop']")
     
     # Vamos a implementar una técnica de reducción del learning rate a medida que el modelo va estancandose en el entrenamiento
     # De esta forma cuando se este acercando al mínimo, se podrán ajustar los pesos de forma más precisa para optimizarlos
-    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.3,patience=patience//2,min_lr=1e-7)
+    scheduler = ReduceLROnPlateau(optimizer,mode="min",factor=0.35,patience=patience//2,min_lr=1e-7)
 
     # Bucle de entrenamiento
     pbar = tqdm(range(max_epochs))
@@ -252,6 +252,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
             no_improvement = 0
             mejor_log = current_log
             torch.save(model.state_dict(),f"./{model.name}_best_model.pth")
+
         else:
             if epoch >= warmup:
                 no_improvement += 1
@@ -277,13 +278,13 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
 
 # Funcion del entrenamiento completo para realizar las dos etapas diferentes
 def complete_training(model_type,model_name,opt_name,train_dataloader,val_dataloader,lr1=1e-3,lr2=1e-5,dropout=0.2,fine_tuning=False,
-                      size1=1024,size2=512,patience1=5,patience2=10,max_epochs1=25,max_epochs2=40,label_smoothing=0.01,device="cpu",callback=None):
+                      size1=1024,size2=512,patience1=5,patience2=10,max_epochs1=15,max_epochs2=20,label_smoothing=0.01,device="cpu",callback=None):
     torch.cuda.empty_cache()
     # Llamamos a la función que crea el modelo
     if model_type == "MRConvolutional":
         model = MRConvolutionalModel(model_name,dropout,size1,size2).to(device)
     elif model_type == "MRConvolutional_Hist":
-        model = MRConvolutionalModelHistogram(model_name,32,dropout,size1,size2).to(device)
+        model = MRConvolutionalModel(model_name,dropout,size1,size2,use_histogram=True,num_bins=32).to(device)
     elif model_type == "MRVisionTransformer":
         model = MRVisionTransformer(model_name,dropout,size1,size2).to(device)
     else:
@@ -304,7 +305,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
             layers = list(model.model.layer4.parameters())
         elif model_name in ["EfficientNetV2_small","RegNet_Y_3_2GF","ConvNeXt_tiny","ConvNeXt_small"]:
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
-            layers = list(model.model.features[-4:].parameters())
+            layers = list(model.model.features[-2:].parameters())
 
         # Para los vision transformers
         elif model_name == "ViT_B_16":
@@ -319,7 +320,7 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
         for param in layers:
             param.requires_grad=True
         obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,patience2,max_epochs2,lr2,label_smoothing,
-                               device,fine_tuning=True,callback=callback,start_epoch=next_epoch)
+                                 device,fine_tuning=True,callback=callback,start_epoch=next_epoch)
 
     del model
     torch.cuda.empty_cache()
@@ -334,12 +335,12 @@ Primera prueba - modelo base congelado y solo entrenamos la cabeza
     MAE por clases: 0.0737 | 0.0078 | 0.025 | 0.1254 | 0.052 | 0.0077 | 0.0721 | 0.015 | 0.008 | 0.0099
 
 Segunda prueba - primera fase con el modelo base congelado y una segunda fase donde se descongela las últimas capas del modelo base
-    Divergencia KL: 0.2449 , MAE Loss: 0.0350
-    MAE por clases: 0.0697 | 0.0075 | 0.0196 | 0.1105 | 0.047 | 0.0084 | 0.0549 | 0.0154 | 0.008 | 0.0087
+    Divergencia KL: 0.2332 , MAE Loss: 0.0349
+    MAE por clases: 0.0728 | 0.005 | 0.019 | 0.1176 | 0.0496 | 0.0071 | 0.0537 | 0.0127 | 0.0049 | 0.0064
 
 Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
-Divergencia KL: 0.3731 , MAE Loss: 0.0497
-MAE por clases: 0.0855 | 0.0112 | 0.0247 | 0.1593 | 0.0884 | 0.0121 | 0.0753 | 0.0176 | 0.0072 | 0.0151
+    Divergencia KL: 0.3084 , MAE Loss: 0.0422
+    MAE por clases: 0.0891 | 0.0111 | 0.0165 | 0.1347 | 0.057 | 0.0151 | 0.0659 | 0.0187 | 0.006 | 0.0077
 
 Parece en este caso es mejor entrenar la cabeza y luego ya descongelar las últimas capas para hacer algún ajuste
 """
@@ -352,43 +353,89 @@ def main():
     # Fijamos una semilla considerando que las ejecuciones han sido todas realizadas con GPU y no con CPU
     torch.manual_seed(67)
     torch.cuda.manual_seed_all(67)
+    random.seed(67)
     # Elegimos la gpu si está disponible y si no la cpu
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Cargamos en data frames los conjuntos de datos ya divididos
-    train_def = pd.read_csv("./dataset_dividido/train_def.csv")
+    train = pd.read_csv("./dataset_dividido/train.csv")
     val = pd.read_csv("./dataset_dividido/val.csv")
     # El de test lo usaremos más tarde para comparar y no ahora para entrenar
 
     # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
-    train_dataset_def = CustomImageDataset("./fotos_recortadas",train_def,True)
+    train_dataset_def = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True)
     val_dataset = CustomImageDataset("./fotos_recortadas",val,True)
-    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=2)
-    val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=2)
+    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=6,persistent_workers=True)
+    val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
 
-    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=2e-3,lr2=1e-5,dropout=0.2,fine_tuning=True,
-                      size1=1152,size2=384,patience1=15,patience2=30,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=4e-5,dropout=0.4,fine_tuning=True,
+                      size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01,device=device)
+    
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=4e-5,dropout=0.4,fine_tuning=True,
+                      size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01,device=device)
+
+    # Para VisionT
+    complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
+                      size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+
+    #complete_training("MRVisionTransformer","DINOv2_ViT_B","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
     main()
 
 """
-BASE CONVOLUCIONAL SIN HISTOGRAMA (DOS BLOQUES):
-# Logica antigua de scheduler (paciencia 1/3 y creo que era factor=0.1) y 5e-5 lr:
-    Divergencia KL: 0.2449 , MAE Loss: 0.0350
-    MAE por clases: 0.0697 | 0.0075 | 0.0196 | 0.1105 | 0.047 | 0.0084 | 0.0549 | 0.0154 | 0.008 | 0.0087
-
-# Nueva logica de scheduler y 3e-5 lr:
-    Divergencia KL: 0.2461 , MAE Loss: 0.0363
-    MAE por clases: 0.0731 | 0.0088 | 0.02 | 0.1157 | 0.048 | 0.0081 | 0.0568 | 0.0163 | 0.007 | 0.0094
-
-# Nueva logica de scheduler y 6e-6 lr:
-
-BASE CONVOLUCIONAL SIN HISTOGRAMA (CUATRO BLOQUES):
-# Nueva logica de scheduler y 1e-5 lr:
+--- BASE CONVOLUCIONAL SIN HISTOGRAMA (DOS BLOQUES):
+Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=1.5e-3,lr2=2e-5,dropout=0.3,batch_size=64 - size1=896,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+    Divergencia KL: 0.2332 , MAE Loss: 0.0349
+    MAE por clases: 0.0728 | 0.005 | 0.019 | 0.1176 | 0.0496 | 0.0071 | 0.0537 | 0.0127 | 0.0049 | 0.0064
+    MAE por clases: 0.1125 | 0.0123 | 0.0706 | 0.1659 | 0.0989 | 0.027 | 0.143 | 0.0622 | 0.009 | 0.0541 - solo en imágenes en las que aparecen
 
 
-BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
+!!!!! Menos overfitting  !!!! Baseline guardada actualmente
+Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+    Divergencia KL: 0.2549 , MAE Loss: 0.0387
+    MAE por clases: 0.0742 | 0.0068 | 0.0214 | 0.1331 | 0.0584 | 0.0064 | 0.0586 | 0.0138 | 0.0064 | 0.0079
+    MAE por clases: 0.1194 | 0.0222 | 0.078 | 0.1755 | 0.1136 | 0.025 | 0.1455 | 0.0702 | 0.0091 | 0.0477 - solo en imágenes en las que aparecen
+
+
+Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=4e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01
+
+
+
+--- BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
+!!!!! Baseline guardada actualmente    
+Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=1.5e-3,lr2=2e-5,dropout=0.3,batch_size=64 - size1=896,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+    Divergencia KL: 0.2614 , MAE Loss: 0.0387
+    MAE por clases: 0.0751 | 0.0092 | 0.0201 | 0.1285 | 0.0591 | 0.0076 | 0.0564 | 0.0147 | 0.006 | 0.0102
+    MAE por clases: 0.1199 | 0.021 | 0.0716 | 0.1776 | 0.1152 | 0.0211 | 0.1396 | 0.0971 | 0.008 | 0.0546 - solo en imágenes en las que aparecen
+
+
+Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01    
+
+
+Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=4e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01
+    
+
+    
+--- BASE VisionT SIN HISTOGRAMA (DOS BLOQUES):
+Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"Swin_V2_S","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+
+    
+Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"DINOv2_ViT_B","AdamW" - lr1=5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01  
+    
+
+
+--- BASE VisionT CON HISTOGRAMA (DOS BLOQUES):
+
 
 
 

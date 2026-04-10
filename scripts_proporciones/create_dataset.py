@@ -6,7 +6,15 @@ from skmultilearn.model_selection import iterative_train_test_split
 from torchvision import transforms
 import pandas as pd
 import os
+import random
 
+class RandomRotation(torch.nn.Module):
+    """
+    Clase que se utilizará para realizar rotaciones aleatorias de múltiplos de 90 grados en caso de aplicar data augmentation.
+    """
+    def forward(self,x):
+        angle = random.choice([0,90,180,270]) # Puede darse el caso de que la imagen no rote
+        return transforms.functional.rotate(x,angle)
 
 class CustomImageDataset(Dataset):
     """ 
@@ -20,7 +28,9 @@ class CustomImageDataset(Dataset):
     Parámetros:
         'images_dir'        - ruta del directorio que contiene las fotos recortadas
         'df'                - data frame que contiene los nombres
-        'train'             - valor booleano que indica si el dataset se usará para el entrenamiento o no  
+        'train'             - valor booleano que indica si el dataset se usará para el entrenamiento o no (puede ser para validación o test también)
+        'img_size'          - valor numérico que indica el tamaño final que tendrán las imágenes del dataset
+        'augmentation'      - valor booleano que indica si queremos aplicar data augmentation al conjunto de datos 
 
     El formato del data frame es el siguiente.
     Columna obligatoria:
@@ -37,14 +47,35 @@ class CustomImageDataset(Dataset):
         'algas rojas'        - porcentaje de presencia que tiene este elemento en la foto     
         'microfitobentos'    - porcentaje de presencia que tiene este elemento en la foto          
     """
-    def __init__(self, images_dir,df,train=False,img_size=384):
+    def __init__(self,images_dir,df,train=False,img_size=384,augmentation=False):
         self.images_dir = images_dir
         self.images = df["foto"].values
-        self.transform = transforms.Compose([
-                         transforms.Resize((img_size,img_size)), # Transforma el tamaño de las imagenes
-                         transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1 para la normalización posterior
-                         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
-                         ])
+        self.augmentation = augmentation
+
+        self.transform = transforms.Compose([transforms.Resize((img_size, img_size),interpolation=transforms.InterpolationMode.BICUBIC), # Transforma el tamaño de las imagenes
+                                            transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1 para la normalización posterior
+                                            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
+                                            ])
+
+        # Transformaciones que se van a aplicar para para el data augmentation
+        self.augment_transform = transforms.Compose([
+                                # Volteos como si se usara un espejo
+                                transforms.RandomHorizontalFlip(p=0.5),
+                                transforms.RandomVerticalFlip(p=0.5),
+                                # Rotaciones de múltiplos de 90 grados
+                                RandomRotation(),
+                                # Ajustes de color en las imágenes
+                                transforms.RandomApply([
+                                transforms.ColorJitter(
+                                    brightness=0.25,  # Variación de iluminación
+                                    contrast=0.25,    # Variación de contraste
+                                    saturation=0.2,  # Variación de saturación
+                                    hue=0.03         # Variación de tono, se elige un valor bajo para no cambiar mucho los colores
+                                )],p=0.3),
+                                transforms.RandomApply([
+                                transforms.GaussianBlur(kernel_size=5,sigma=(0.1, 1.5) # Simulamos ruido gaussiano con efecto borroso
+                                )],p=0.2)])
+
         # Obtenemos las etiquetas solo si queremos usar el dataset para el entrenamiento
         self.train = train
         self.target_cols = ['n. noltei','z. marina','g. vermiculophylla','sedimento','arena','roca','algas verdes','algas pardas','algas rojas','microfitobentos']
@@ -79,7 +110,10 @@ class CustomImageDataset(Dataset):
         img_path = f"{self.images_dir}/{image_name}"
         image = read_image(img_path) # De esta forma se pasan directamente a tensor
 
-        if self.transform: # Aplicamos las transformaciones de tamaño
+        if self.augmentation: # Si queremos hacer data augmentation aplicamos aleatoriamente transformaciones
+            image = self.augment_transform(image)
+
+        if self.transform: # Aplicamos las transformaciones de normalización
             image = self.transform(image)
 
         # Comprobamos si tenemos las etiquetas para devolver el conjunto completo para entreamiento o solo las imágenes
@@ -90,7 +124,7 @@ class CustomImageDataset(Dataset):
             return image,image_name
     
 
-def create_dataset(df,target_cols,out_dir,train_size=0.7,augmentation=False):
+def create_dataset(df,target_cols,out_dir,train_size=0.7):
     """
     Función para dividir un conjunto de datos en formato data frame de pandas en conjuntos de train, val y test que se almacenarán como 
     documentos csv en un directorio de salida elegido con esos mismos nombres. En caso de querer añadir imagenes creadas mediante
@@ -131,25 +165,6 @@ def create_dataset(df,target_cols,out_dir,train_size=0.7,augmentation=False):
     val.to_csv(f"{out_dir}/val.csv",index=False)
     test.to_csv(f"{out_dir}/test.csv",index=False)
 
-    if augmentation==True:
-        train_aug = train.copy()
-        train_aug["foto"] = "RE_" + train_aug["foto"]
-
-        val_aug = val.copy()
-        val_aug["foto"] = "RE_" + val_aug["foto"]
-
-        test_aug = test.copy()
-        test_aug["foto"] = "RE_" + test_aug["foto"]
-
-        # Concatenamos los diferentes data frames
-        train_def = pd.concat([train,train_aug],ignore_index=True)
-        val_def = pd.concat([val,val_aug],ignore_index=True)
-        test_def = pd.concat([test,test_aug],ignore_index=True)
-
-        train_def.to_csv(f"{out_dir}/train_def.csv",index=False)
-        val_def.to_csv(f"{out_dir}/val_def.csv",index=False)
-        test_def.to_csv(f"{out_dir}/test_def.csv",index=False)
-
 
 def main():
     """
@@ -167,7 +182,8 @@ def main():
     target_cols = ['n. noltei','z. marina','g. vermiculophylla','sedimento','arena','roca','algas verdes','algas pardas','algas rojas','microfitobentos']
     out_dir = "./dataset_dividido"
 
-    create_dataset(labels,target_cols,out_dir,train_size=0.7,augmentation=True)
+    # Creamos y almacenamos los datasets divididos
+    create_dataset(labels,target_cols,out_dir,train_size=0.7)
     
     
 if __name__ == "__main__":
