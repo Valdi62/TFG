@@ -85,6 +85,9 @@ class MRConvolutionalModel(nn.Module):
             x_max = x_reduced.max(dim=2,keepdim=True).values
             # Normalizamos las entradas entre 0 y 1, añadimos 1e-8 para evitar la división por 0
             x_norm = (x_reduced-x_min)/(x_max-x_min+1e-8)
+            
+
+
             # Intercambiamos las dos últimas dimensiones porque luego la capa de histograma las vuelve a intercambiar y las dejará correctamente
             x_norm = x_norm.mT
 

@@ -67,10 +67,10 @@ class CustomImageDataset(Dataset):
                                 # Ajustes de color en las imágenes
                                 transforms.RandomApply([
                                 transforms.ColorJitter(
-                                    brightness=0.25,  # Variación de iluminación
+                                    brightness=0.25,  # Variación de brillo
                                     contrast=0.25,    # Variación de contraste
-                                    saturation=0.2,  # Variación de saturación
-                                    hue=0.03         # Variación de tono, se elige un valor bajo para no cambiar mucho los colores
+                                    saturation=0.2,   # Variación de saturación
+                                    hue=0.03          # Variación de tono, se elige un valor bajo para no cambiar mucho los colores
                                 )],p=0.3),
                                 transforms.RandomApply([
                                 transforms.GaussianBlur(kernel_size=5,sigma=(0.1, 1.5) # Simulamos ruido gaussiano con efecto borroso

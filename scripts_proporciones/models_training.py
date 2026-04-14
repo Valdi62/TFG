@@ -152,7 +152,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     # Utilizaremos una clase personalizada de la función divergencia KL con pesos para las clases
     mae_loss_module = nn.L1Loss()
     # El valor del smoothing es importante ajustarlo para que le dé peso a las clases raras pero no ignore las clases comunes por culpa de esto
-    class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.2,device=device)
+    class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
     kl_divergence_module = WeightedKLDivLoss(class_weights,reduction="batchmean")
 
     # Vamos a filtrar los parámetros que no están congelados para solo pasarle los que sean estrictamente necesarios al optimizador
@@ -213,7 +213,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
             epoch_kl_divergence += kl_divergence.item()
 
             # Pasada hacia atrás
-            kl_divergence.backward()
+            #kl_divergence.backward()
+            kl_divergence.backward() # PRobamos la mae
             # Actualizar los parámetros
             optimizer.step()
 
@@ -368,15 +369,15 @@ def main():
     train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=6,persistent_workers=True)
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
 
-    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=4e-5,dropout=0.4,fine_tuning=True,
-                      size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01,device=device)
+    #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02,device=device)
     
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=4e-5,dropout=0.4,fine_tuning=True,
-                      size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
     # Para VisionT
-    complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
-                      size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    #complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
+    #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
     #complete_training("MRVisionTransformer","DINOv2_ViT_B","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
     #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
@@ -393,7 +394,7 @@ Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - w
     MAE por clases: 0.1125 | 0.0123 | 0.0706 | 0.1659 | 0.0989 | 0.027 | 0.143 | 0.0622 | 0.009 | 0.0541 - solo en imágenes en las que aparecen
 
 
-!!!!! Menos overfitting  !!!! Baseline guardada actualmente
+!!!!! BASELINE ORIGINAL
 Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
     Divergencia KL: 0.2549 , MAE Loss: 0.0387
@@ -401,37 +402,99 @@ Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - w
     MAE por clases: 0.1194 | 0.0222 | 0.078 | 0.1755 | 0.1136 | 0.025 | 0.1455 | 0.0702 | 0.0091 | 0.0477 - solo en imágenes en las que aparecen
 
 
-Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=4e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=1e-5,dropout=0.35,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+    Divergencia KL: 0.2400 , MAE Loss: 0.0356
+    MAE por clases: 0.0721 | 0.0068 | 0.0184 | 0.1213 | 0.0507 | 0.0058 | 0.0566 | 0.0129 | 0.005 | 0.007
+    MAE por clases: 0.1102 | 0.0191 | 0.0635 | 0.1617 | 0.1243 | 0.0246 | 0.1447 | 0.0657 | 0.008 | 0.0559 - solo en imágenes en las que aparecen
+
+    
+!!!! BASELINE GUARDADA ACTUALMENTE - Menos overfitting que el modelo anterior
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 0.2400 , MAE Loss: 0.0356
+    MAE por clases: 0.0721 | 0.0068 | 0.0184 | 0.1213 | 0.0507 | 0.0058 | 0.0566 | 0.0129 | 0.005 | 0.007
+    MAE por clases: 0.1102 | 0.0957 | 0.127 | 0.1617 | 0.1554 | 0.0616 | 0.1447 | 0.0939 | 0.0265 | 0.1862 - solo en imágenes en las que aparecen
+-------------------------------
+    Divergencia KL: 0.2381 , MAE Loss: 0.0350
+    MAE por clases: 0.0727 | 0.0070 | 0.0193 | 0.1186 | 0.0468 | 0.0056 | 0.0548 | 0.0135 | 0.0051 | 0.0071
+    MAE por clases: 0.1070 | 0.1002 | 0.1458 | 0.1545 | 0.1520 | 0.0619 | 0.1419 | 0.1175 | 0.0265 | 0.1747 - solo en imágenes en las que aparecen
+
+    
+
+Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02      
 
 
+
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.5,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 0.2575 , MAE Loss: 0.0389
+    MAE por clases: 0.0763 | 0.007 | 0.0201 | 0.1328 | 0.0589 | 0.0072 | 0.0591 | 0.0139 | 0.0056 | 0.0079
+    MAE por clases: 0.1187 | 0.1054 | 0.1375 | 0.177 | 0.1531 | 0.0626 | 0.1469 | 0.1045 | 0.0245 | 0.1701 - solo en imágenes en las que aparecen
+
+
+    
 
 --- BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
-!!!!! Baseline guardada actualmente    
 Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=1.5e-3,lr2=2e-5,dropout=0.3,batch_size=64 - size1=896,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
     Divergencia KL: 0.2614 , MAE Loss: 0.0387
     MAE por clases: 0.0751 | 0.0092 | 0.0201 | 0.1285 | 0.0591 | 0.0076 | 0.0564 | 0.0147 | 0.006 | 0.0102
     MAE por clases: 0.1199 | 0.021 | 0.0716 | 0.1776 | 0.1152 | 0.0211 | 0.1396 | 0.0971 | 0.008 | 0.0546 - solo en imágenes en las que aparecen
 
+    
+!!!!! Baseline guardada actualmente  
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Modelo de red multiregresión MRConvolutional_Histogram_ConvNeXt_tiny.
+    Divergencia KL: 0.2370 , MAE Loss: 0.0372
+    MAE por clases: 0.0739 | 0.0065 | 0.02 | 0.1275 | 0.0527 | 0.0065 | 0.0577 | 0.0146 | 0.0052 | 0.0077
+    MAE por clases: 0.1112 | 0.0872 | 0.1288 | 0.1677 | 0.1434 | 0.0556 | 0.1445 | 0.1025 | 0.0291 | 0.1782 - solo en imágenes en las que aparecen 
+-------------------------------
+    Divergencia KL: 0.2325 , MAE Loss: 0.0365
+    MAE por clases: 0.0742 | 0.0068 | 0.0209 | 0.1245 | 0.0484 | 0.0063 | 0.0556 | 0.0152 | 0.0053 | 0.0079
+    MAE por clases: 0.1090 | 0.0913 | 0.1452 | 0.1608 | 0.1574 | 0.0601 | 0.1400 | 0.1271 | 0.0291 | 0.1649 - solo en imágenes en las que aparecen
+
+    
+!!!!! NUEVO MODELO DE HISTOGRAMA CON NORMALIZACION POR BATCH
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Modelo de red multiregresión MRConvolutional_Histogram_ConvNeXt_tiny.
+       
 
 Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01    
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02    
 
 
+
+!!!! Baseline antigua - MAS OVERFITTING
 Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=4e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01
-    
+    Divergencia KL: 0.2562 , MAE Loss: 0.0379
+    MAE por clases: 0.0752 | 0.0066 | 0.0191 | 0.1259 | 0.055 | 0.0071 | 0.0593 | 0.0142 | 0.0066 | 0.0097
+    MAE por clases: 0.1157 | 0.0172 | 0.0714 | 0.1711 | 0.1349 | 0.0247 | 0.1505 | 0.0622 | 0.0065 | 0.0573 - solo en imágenes en las que aparecen  
 
     
+
+
 --- BASE VisionT SIN HISTOGRAMA (DOS BLOQUES):
 Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "Swin_V2_S","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+    Divergencia KL: 0.2595 , MAE Loss: 0.0403
+    MAE por clases: 0.0771 | 0.0079 | 0.0239 | 0.1334 | 0.0546 | 0.0102 | 0.0622 | 0.0169 | 0.0076 | 0.0089
+    MAE por clases: 0.1201 | 0.021 | 0.0551 | 0.1799 | 0.1002 | 0.0188 | 0.1489 | 0.0879 | 0.0059 | 0.0595 - solo en imágenes en las que aparecen
 
-    
+
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"Swin_V2_S","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.3,batch_size=64 - size1=512,size2=128,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
+       
+
 Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "DINOv2_ViT_B","AdamW" - lr1=5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01  
-    
+    Divergencia KL: 0.2719 , MAE Loss: 0.0405
+    MAE por clases: 0.0807 | 0.0094 | 0.022 | 0.1345 | 0.0619 | 0.0079 | 0.0563 | 0.0153 | 0.0101 | 0.0071
+    MAE por clases: 0.1272 | 0.0284 | 0.0417 | 0.1797 | 0.1596 | 0.0194 | 0.1255 | 0.0746 | 0.0102 | 0.0541 - solo en imágenes en las que aparecen
 
 
 --- BASE VisionT CON HISTOGRAMA (DOS BLOQUES):
