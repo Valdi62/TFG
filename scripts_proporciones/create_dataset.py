@@ -47,15 +47,16 @@ class CustomImageDataset(Dataset):
         'algas rojas'        - porcentaje de presencia que tiene este elemento en la foto     
         'microfitobentos'    - porcentaje de presencia que tiene este elemento en la foto          
     """
-    def __init__(self,images_dir,df,train=False,img_size=384,augmentation=False):
+    def __init__(self,images_dir,df,train=False,img_size=384,augmentation=False,hist=False):
         self.images_dir = images_dir
         self.images = df["foto"].values
         self.augmentation = augmentation
+        self.hist = hist
 
         self.transform = transforms.Compose([transforms.Resize((img_size, img_size),interpolation=transforms.InterpolationMode.BICUBIC), # Transforma el tamaño de las imagenes
-                                            transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1 para la normalización posterior
-                                            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
+                                            transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1
                                             ])
+        self.imagenet_norm = transforms.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
 
         # Transformaciones que se van a aplicar para para el data augmentation
         self.augment_transform = transforms.Compose([
@@ -113,15 +114,23 @@ class CustomImageDataset(Dataset):
         if self.augmentation: # Si queremos hacer data augmentation aplicamos aleatoriamente transformaciones
             image = self.augment_transform(image)
 
-        if self.transform: # Aplicamos las transformaciones de normalización
-            image = self.transform(image)
+        # Aplicamos las transformaciones de normalización
+        image = self.transform(image)
+        image_norm = self.imagenet_norm(image)
 
-        # Comprobamos si tenemos las etiquetas para devolver el conjunto completo para entreamiento o solo las imágenes
+        # Si el dataset se va a usar en entrenamiento devolvemos las etiquetas, si es para inferencia devolvemos el nombre de la imagen
         if self.train:
             labels = torch.tensor(self.labels[idx])
-            return image,labels
         else:
-            return image,image_name
+            labels = image_name
+        
+        # Si queremos usar la capa de histograma en el modelo, necesitamos por un lado las imagenes normalizadas con los valores de imagenet
+        #  para la pasada por la base del modelo, y luego las imagenes simplemente normalizadas entre 0 y 1 para pasar por el dataset
+        if self.hist:
+            return image_norm,labels,image
+        else:
+            return image_norm,labels,[]
+
     
 
 def create_dataset(df,target_cols,out_dir,train_size=0.7):

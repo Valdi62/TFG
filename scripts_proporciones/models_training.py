@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from torch.optim.lr_scheduler import ReduceLROnPlateau,CosineAnnealingLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import DataLoader
@@ -63,7 +63,7 @@ def calculate_class_weights(dataloader,n_classes=10,smoothing=0.05,device="cpu")
     total_samples = 0
     
     # Contamos uno por cada imagen en la que aparezca
-    for _,data_labels in dataloader:
+    for _,data_labels,_ in dataloader:
         data_labels = data_labels.to(device)
         class_sums += (data_labels>0).sum(dim=0)
         total_samples += data_labels.size(0)
@@ -96,7 +96,7 @@ def save_graph(history,module,model,fine_tuning=0):
 
     # Guardamos la gráfica en formato .html para que sea interactiva
     fig.write_html(f"evolucion_{module}_{model}.html")
-    
+
 
 # Bucles de validación
 def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
@@ -110,14 +110,16 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
     with torch.no_grad():
         model.eval()
-        for data_inputs,data_labels in val_dataloader:
+        for data_inputs,data_labels,data_histogram in val_dataloader:
             data_inputs = data_inputs.to(device)
             data_labels = data_labels.to(device)
+            if len(data_histogram)>0:
+                data_histogram = data_histogram.to(device)
 
             # Vamos a evitar que las etiquetas tengan el valor exacto 0 para evitar que la divergencia kl colapse
             smooth_labels = data_labels*(1-label_smoothing)+label_smoothing/10
 
-            log_preds = model(data_inputs)
+            log_preds = model(data_inputs,data_histogram)
 
             # Calcular el valor de la función de pérdida mae y la divergencia kl
             y_pred = torch.exp(log_preds)
@@ -193,17 +195,20 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         epoch_mae_loss = 0
         epoch_kl_divergence = 0
 
-        for data_inputs,data_labels in train_dataloader:
+        for data_inputs,data_labels,data_histogram in train_dataloader:
             # Hacer una pasada hacia delante
             data_inputs = data_inputs.to(device)
             data_labels = data_labels.to(device)
+            if len(data_histogram)>0:
+                data_histogram = data_histogram.to(device)
+
             # Vamos a evitar que las etiquetas tengan el valor exacto 0 para evitar que la divergencia kl colapse
             smooth_labels = data_labels*(1-label_smoothing)+label_smoothing/10
 
             # Reiniciar los gradientes
             optimizer.zero_grad()
             # Predicción del modelo que saldrá en forma de logaritmos al usar una LogSoftmax
-            log_preds = model(data_inputs)
+            log_preds = model(data_inputs,data_histogram)
 
             # Calcular el valor de la función de pérdida mae y la divergencia kl
             mae_loss = mae_loss_module(torch.exp(log_preds),data_labels)
@@ -335,9 +340,9 @@ Primera prueba - modelo base congelado y solo entrenamos la cabeza
     Divergencia KL: 0.2967 , MAE Loss: 0.0397
     MAE por clases: 0.0737 | 0.0078 | 0.025 | 0.1254 | 0.052 | 0.0077 | 0.0721 | 0.015 | 0.008 | 0.0099
 
-Segunda prueba - primera fase con el modelo base congelado y una segunda fase donde se descongela las últimas capas del modelo base
-    Divergencia KL: 0.2332 , MAE Loss: 0.0349
-    MAE por clases: 0.0728 | 0.005 | 0.019 | 0.1176 | 0.0496 | 0.0071 | 0.0537 | 0.0127 | 0.0049 | 0.0064
+Divergencia KL: 0.2400 , MAE Loss: 0.0356
+    MAE por clases: 0.0721 | 0.0068 | 0.0184 | 0.1213 | 0.0507 | 0.0058 | 0.0566 | 0.0129 | 0.005 | 0.007
+    MAE por clases: 0.1102 | 0.0957 | 0.127 | 0.1617 | 0.1554 | 0.0616 | 0.1447 | 0.0939 | 0.0265 | 0.1862 - solo en imágenes en las que aparecen
 
 Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
     Divergencia KL: 0.3084 , MAE Loss: 0.0422
@@ -370,9 +375,15 @@ def main():
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
 
     #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02,device=device)
+    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
     
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    # Si vamos a utilizar histogramas debemos definir el dataset de entrenamiento de esta forma:
+    train_dataset_hist = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True,hist=True)
+    train_dataloader_hist = DataLoader(train_dataset_hist,batch_size=64,shuffle=True,pin_memory=True,num_workers=6,persistent_workers=True)
+    val_dataset_hist = CustomImageDataset("./fotos_recortadas",val,True,hist=True)
+    val_dataloader_hist = DataLoader(val_dataset_hist,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
+
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
                       size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
     # Para VisionT
@@ -419,13 +430,7 @@ Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - we
     Divergencia KL: 0.2381 , MAE Loss: 0.0350
     MAE por clases: 0.0727 | 0.0070 | 0.0193 | 0.1186 | 0.0468 | 0.0056 | 0.0548 | 0.0135 | 0.0051 | 0.0071
     MAE por clases: 0.1070 | 0.1002 | 0.1458 | 0.1545 | 0.1520 | 0.0619 | 0.1419 | 0.1175 | 0.0265 | 0.1747 - solo en imágenes en las que aparecen
-
     
-
-Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02      
-
-
 
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.5,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
@@ -444,28 +449,16 @@ Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - w
     MAE por clases: 0.1199 | 0.021 | 0.0716 | 0.1776 | 0.1152 | 0.0211 | 0.1396 | 0.0971 | 0.008 | 0.0546 - solo en imágenes en las que aparecen
 
     
-!!!!! Baseline guardada actualmente  
+!!!!! Baseline guardada actualmente  - !!!! NUEVO MODELO DE HISTOGRAMA CON NORMALIZACION GLOBAL
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
-    Modelo de red multiregresión MRConvolutional_Histogram_ConvNeXt_tiny.
     Divergencia KL: 0.2370 , MAE Loss: 0.0372
     MAE por clases: 0.0739 | 0.0065 | 0.02 | 0.1275 | 0.0527 | 0.0065 | 0.0577 | 0.0146 | 0.0052 | 0.0077
     MAE por clases: 0.1112 | 0.0872 | 0.1288 | 0.1677 | 0.1434 | 0.0556 | 0.1445 | 0.1025 | 0.0291 | 0.1782 - solo en imágenes en las que aparecen 
 -------------------------------
-    Divergencia KL: 0.2325 , MAE Loss: 0.0365
-    MAE por clases: 0.0742 | 0.0068 | 0.0209 | 0.1245 | 0.0484 | 0.0063 | 0.0556 | 0.0152 | 0.0053 | 0.0079
-    MAE por clases: 0.1090 | 0.0913 | 0.1452 | 0.1608 | 0.1574 | 0.0601 | 0.1400 | 0.1271 | 0.0291 | 0.1649 - solo en imágenes en las que aparecen
-
-    
-!!!!! NUEVO MODELO DE HISTOGRAMA CON NORMALIZACION POR BATCH
-Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
-    Modelo de red multiregresión MRConvolutional_Histogram_ConvNeXt_tiny.
-       
-
-Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02    
-
+    Divergencia KL: 0.2296 , MAE Loss: 0.0364
+    MAE por clases: 0.0749 | 0.006 | 0.0205 | 0.1242 | 0.0492 | 0.0065 | 0.0543 | 0.0149 | 0.0051 | 0.0082
+    MAE por clases: 0.1096 | 0.0711 | 0.1433 | 0.1578 | 0.1618 | 0.0569 | 0.1435 | 0.1245 | 0.0297 | 0.1733 - solo en imágenes en las que aparecen
 
 
 !!!! Baseline antigua - MAS OVERFITTING
@@ -489,6 +482,7 @@ Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - we
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "Swin_V2_S","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.3,batch_size=64 - size1=512,size2=128,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
        
+
 
 Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "DINOv2_ViT_B","AdamW" - lr1=5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01  

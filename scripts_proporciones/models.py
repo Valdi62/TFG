@@ -67,7 +67,7 @@ class MRConvolutionalModel(nn.Module):
                                     nn.Linear(final_size,10),
                                     nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
 
-    def forward(self,x):
+    def forward(self,x,x_hist=None):
         ## Pasada por la red convolucional ##
         x_conv = self.model(x)
         x_conv = self.head(x_conv)
@@ -77,22 +77,23 @@ class MRConvolutionalModel(nn.Module):
             ## Preprocesado de la entrada para poder pasar por la capa de histograma
             # Para aplicar la capa de histograma podemos reducir el tamaño general de las imágenes para que no se agote la memoria por las operaciones
             # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles cercanos en la imagen original
-            x_reduced = nn.functional.interpolate(x,size=(128,128),mode='bilinear',align_corners=False)
+            x_reduced = nn.functional.interpolate(x_hist,size=(128,128),mode='bilinear',align_corners=False)
             # Combinamos las dimensiones de alto y ancho al final para aplanar la imagen
             x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
+
+            #   - Normalización antigua incorrecta
             # Calculamos el menor y mayor valor de cada canal de la imagen
-            x_min = x_reduced.min(dim=2,keepdim=True).values
-            x_max = x_reduced.max(dim=2,keepdim=True).values
+            #x_min = x_reduced.min(dim=2,keepdim=True).values
+            #x_max = x_reduced.max(dim=2,keepdim=True).values
             # Normalizamos las entradas entre 0 y 1, añadimos 1e-8 para evitar la división por 0
-            x_norm = (x_reduced-x_min)/(x_max-x_min+1e-8)
+            #x_norm = (x_reduced-x_min)/(x_max-x_min+1e-8)
             
-
-
+            # - Nueva normalización correcta viene como parámetro
             # Intercambiamos las dos últimas dimensiones porque luego la capa de histograma las vuelve a intercambiar y las dejará correctamente
-            x_norm = x_norm.mT
+            x_reduced = x_reduced.mT
 
             ## Pasada por la capa de Histograma ##
-            x_hist = self.histogram(x_norm)
+            x_hist = self.histogram(x_reduced)
             x_hist = self.hist_proj(x_hist)
 
             # Concatenamos la salida de la red con la salida del histograma (Revisar)
