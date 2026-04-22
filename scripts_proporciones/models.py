@@ -77,7 +77,7 @@ class MRConvolutionalModel(nn.Module):
             ## Preprocesado de la entrada para poder pasar por la capa de histograma
             # Para aplicar la capa de histograma podemos reducir el tamaño general de las imágenes para que no se agote la memoria por las operaciones
             # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles cercanos en la imagen original
-            x_reduced = nn.functional.interpolate(x_hist,size=(128,128),mode='bilinear',align_corners=False)
+            x_reduced = nn.functional.interpolate(x_hist,size=(192,192),mode='bilinear',align_corners=False)
             # Combinamos las dimensiones de alto y ancho al final para aplanar la imagen
             x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
 

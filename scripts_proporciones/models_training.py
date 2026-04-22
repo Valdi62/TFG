@@ -371,11 +371,11 @@ def main():
     # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
     train_dataset_def = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True)
     val_dataset = CustomImageDataset("./fotos_recortadas",val,True)
-    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=6,persistent_workers=True)
-    val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
+    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
+    val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
     
     # Si vamos a utilizar histogramas debemos definir el dataset de entrenamiento de esta forma:
     train_dataset_hist = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True,hist=True)
@@ -383,8 +383,8 @@ def main():
     val_dataset_hist = CustomImageDataset("./fotos_recortadas",val,True,hist=True)
     val_dataloader_hist = DataLoader(val_dataset_hist,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
 
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    #complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
     # Para VisionT
     #complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
@@ -432,14 +432,25 @@ Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - we
     MAE por clases: 0.1070 | 0.1002 | 0.1458 | 0.1545 | 0.1520 | 0.0619 | 0.1419 | 0.1175 | 0.0265 | 0.1747 - solo en imágenes en las que aparecen
     
 
+!!!! Probamosa quitar el suavizado a la hora de calcular los pesos, se calculan las prevalencias tal cual y serán los pesos que se usen
+ Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01    
+
+
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.5,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
     Divergencia KL: 0.2575 , MAE Loss: 0.0389
     MAE por clases: 0.0763 | 0.007 | 0.0201 | 0.1328 | 0.0589 | 0.0072 | 0.0591 | 0.0139 | 0.0056 | 0.0079
     MAE por clases: 0.1187 | 0.1054 | 0.1375 | 0.177 | 0.1531 | 0.0626 | 0.1469 | 0.1045 | 0.0245 | 0.1701 - solo en imágenes en las que aparecen
 
-
     
+Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.5,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.02
+    Divergencia KL: 0.2548 , MAE Loss: 0.0390
+    MAE por clases: 0.0767 | 0.0077 | 0.0241 | 0.1284 | 0.0552 | 0.009 | 0.0569 | 0.0156 | 0.0075 | 0.0087
+    MAE por clases: 0.1122 | 0.1041 | 0.162 | 0.1703 | 0.1558 | 0.0725 | 0.1436 | 0.1216 | 0.0257 | 0.1812 - solo en imágenes en las que aparecen    
+
+
 
 --- BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
 Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
@@ -494,25 +505,4 @@ Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - we
 --- BASE VisionT CON HISTOGRAMA (DOS BLOQUES):
 
 
-
-
-(Para usar la capa de histograma sin que se agote la memoria hay dos formas principales:
- - Reducir batch_size
- - Reducir la resolución de las imágenes
-        ¡¡¡ Es buena idea entrenar con una resolución reducida pero luego predecir con la resolución clásica, o es mejor intentar mantener en ambos casos la misma resolución !!!
-
- Para reducir el tiempo de ejecución hay tres formas principales:
- - Reducir la resolución de las imágenes
- - Reducir el num_bins
- - Aumentar el batch_size
-)
-
- -------------Comparativa de las dos posibles capas de histograma-------------------
-Capa histograma batched - 47 mins
-    Divergencia KL: 0.2880 , MAE Loss: 0.0400
-    MAE por clases: 0.0752 | 0.0078 | 0.0229 | 0.1219 | 0.0574 | 0.008 | 0.0734 | 0.0138 | 0.01 | 0.0099
-
-Capa histograma sin batched - 67 mins
-    Divergencia KL: 0.3022 , MAE Loss: 0.0388
-    MAE por clases: 0.0744 | 0.0064 | 0.0186 | 0.1224 | 0.0576 | 0.0049 | 0.074 | 0.0125 | 0.0099 | 0.0075 
 """
