@@ -16,13 +16,11 @@ class MRConvolutionalModel(nn.Module):
 
         if self.use_histogram:
             # Instanciamos la capa de histograma
-            self.sigmoid = nn.Sigmoid()
-            self.histogram = HardHistogramBatched(n_features=96,num_bins=self.num_bins)
+            self.histogram = HardHistogramBatched(n_features=3,num_bins=self.num_bins)
             # Instanciamos un conjunto de capas para preparar la salida del histograma y poder concatenarla con la salida normal de la red
-            self.out_channels = 96*num_bins
+            self.out_channels = 3*num_bins
             self.hist_proj = nn.Sequential(nn.Linear(self.out_channels,size2),
                                            nn.ReLU())
-            
 
         # Cargar el modelo deseado
         if self.base_model == "RegNet_Y_3_2GF":
@@ -42,7 +40,6 @@ class MRConvolutionalModel(nn.Module):
             self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
             self.head = nn.Sequential(nn.Flatten(),nn.LayerNorm(768),nn.Dropout(dropout),nn.Linear(768,size1))
-
         elif self.base_model == "ConvNeXt_small":
             self.model = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1)
             self.model.classifier = nn.Identity()
@@ -52,7 +49,7 @@ class MRConvolutionalModel(nn.Module):
 
         # Congelar todos los pesos del modelo base pre-entrenado inicialmente
         for param in self.model.parameters():
-            param.requires_grad = False  
+            param.requires_grad = False              
 
         self.layers = nn.Sequential(#nn.ReLU(),
                                     nn.GELU(),  # Como estamos utilizando ConvNext usamos Gelu en vez de Relu porque su arquitectura emplea esta función
@@ -72,26 +69,20 @@ class MRConvolutionalModel(nn.Module):
 
     def forward(self,x,x_hist=None):
         ## Pasada por la red convolucional ##
-        x = self.model.features[:2](x)
-        x_conv = self.model.features[2:](x)
-        x_conv = self.model.avgpool(x_conv)
+        x_conv = self.model(x)
         x_conv = self.head(x_conv)
         x_conv = self.layers(x_conv)
 
-
         if self.use_histogram: 
-            # ## Preprocesado de la entrada para poder pasar por la capa de histograma
-            # # Para aplicar la capa de histograma podemos reducir el tamaño general de las imágenes para que no se agote la memoria por las operaciones
-            # # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles cercanos en la imagen original
-            # x_reduced = nn.functional.interpolate(x_hist,size=(128,128),mode='bilinear',align_corners=False)
-            # # Combinamos las dimensiones de alto y ancho al final para aplanar la imagen
-            # x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
+            ## Preprocesado de la entrada para poder pasar por la capa de histograma
+            # Para aplicar la capa de histograma podemos reducir el tamaño general de las imágenes para que no se agote la memoria por las operaciones
+            # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles cercanos en la imagen original
+            x_reduced = nn.functional.interpolate(x_hist,size=(192,192),mode='bilinear',align_corners=False)
+            # Combinamos las dimensiones de alto y ancho al final para aplanar la imagen
+            x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
 
-            # Pasamos la salida de la primera capa convolucional por una capa sigmoide para que el resultado se mantenga entre 0 y 1
-            x_reduced = nn.functional.adaptive_avg_pool2d(x,(28,28)) # Reducimos el tamaño de la entrada a la capa de histograma
-            x_reduced = self.sigmoid(x_reduced)
-            x_reduced = x_reduced.flatten(2)
-
+            
+            # - Nueva normalización correcta viene como parámetro
             # Intercambiamos las dos últimas dimensiones porque luego la capa de histograma las vuelve a intercambiar y las dejará correctamente
             x_reduced = x_reduced.mT
 
@@ -101,7 +92,6 @@ class MRConvolutionalModel(nn.Module):
 
             # Concatenamos la salida de la red con la salida del histograma (Revisar)
             x_def = torch.cat([x_conv,x_hist],dim=1)
-
         else:
             x_def = x_conv
             
