@@ -45,6 +45,27 @@ class WeightedKLDivLoss(nn.Module):
             return weighted_kl_divergence.sum()
         elif self.reduction == "mean":
             return weighted_kl_divergence.mean()
+        
+class WeightedMAELoss(nn.Module):
+    def __init__(self,class_weights,reduction="mean"):
+        super().__init__()
+        self.class_weights = class_weights
+        self.reduction = reduction
+
+    def forward(self, preds, targets):
+            # Error absoluto por elemento
+            mae = torch.abs(preds - targets)
+
+            # Aplicar pesos por clase
+            weighted_mae = mae * self.class_weights.unsqueeze(0)
+
+            # Reducción
+            if self.reduction == "mean":
+                return weighted_mae.mean()
+            elif self.reduction == "sum":
+                return weighted_mae.sum()
+            elif self.reduction == "none":
+                return weighted_mae
 
 
 # Función para calcular pesos de las clases
@@ -56,7 +77,7 @@ def calculate_class_weights(dataloader,n_classes=10,smoothing=0.05,device="cpu")
         'dataloader' - dataloader con los ejemplos de donde sacamos las frecuencias
         'n_classes'  - número total de clases diferentes
         'smoothing'  - valor que controla la relación de pesos:
-                          * smoothing = 0 -> se equilibran los pesos para que al considerar todos los ejemplos las clases tengan la misma importancia relativa a su frecuencia
+                          * smoothing = 0 -> se equilibran los pesos para que al considerar todos los ejemplos las clases tengan la importancia exactamente relativa a su frecuencia
                           * smoothing > 0 -> controla la relación de pesos entre las clases, a menor valor más importancia tendrán las clases infrecuentes
     """
     class_sums = torch.zeros(n_classes).to(device)
@@ -74,6 +95,40 @@ def calculate_class_weights(dataloader,n_classes=10,smoothing=0.05,device="cpu")
     weights = 1/(class_proportions+smoothing)
     # Por último dividimos los pesos entre la media para que esta sea 1 y se pueda comparar mejor la kl entre datasets diferentes
     weights = weights/weights.mean()
+    return weights
+
+
+# Función para calcular pesos de las clases en función de su presencia proporcional global
+def calculate_proportion_class_weights(dataloader,n_classes=10,smoothing=0.05,device="cpu"):
+    """
+    Función que calcula el vector de pesos para las distintas clases de forma que demos más peso a las clases menos frecuentes de nuestro dataset.
+
+    Parámetros:
+        'dataloader' - dataloader con los ejemplos de donde sacamos las frecuencias
+        'n_classes'  - número total de clases diferentes
+        'smoothing'  - valor que controla la relación de pesos:
+                          * smoothing = 0 -> se equilibran los pesos para que al considerar todos los ejemplos las clases tengan la importancia exactamente relativa a su frecuencia
+                          * smoothing > 0 -> controla la relación de pesos entre las clases, a menor valor más importancia tendrán las clases infrecuentes
+    """
+    class_sums = torch.zeros(n_classes).to(device)
+    total_samples = 0
+    
+    # Contamos uno por cada imagen en la que aparezca
+    for _,data_labels,_ in dataloader:
+        data_labels = data_labels.to(device)
+        class_sums += data_labels.sum(dim=0)
+        total_samples += data_labels.size(0)
+   
+    # Proporción de la frecuencia de cada clase
+    class_proportions = class_sums/total_samples
+    print(class_proportions)
+    # Pesos de cada clase en función de su frecuencia con smoothing controlando el peso máximo posible
+    weights = 1/(class_proportions+smoothing)
+    print(weights)
+    # Por último dividimos los pesos entre la media para que esta sea 1 y se pueda comparar mejor la kl entre datasets diferentes
+    weights = weights/weights.mean()
+    print(weights)
+
     return weights
 
 
@@ -153,9 +208,12 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     # Adicionalmente se calcula el MAE para mostrar por pantalla puesto que es más fácil de interpretar
     # Utilizaremos una clase personalizada de la función divergencia KL con pesos para las clases
     mae_loss_module = nn.L1Loss()
+
     # El valor del smoothing es importante ajustarlo para que le dé peso a las clases raras pero no ignore las clases comunes por culpa de esto
-    class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
+    #class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
+    class_weights = calculate_proportion_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
     kl_divergence_module = WeightedKLDivLoss(class_weights,reduction="batchmean")
+    
 
     # Vamos a filtrar los parámetros que no están congelados para solo pasarle los que sean estrictamente necesarios al optimizador
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -218,8 +276,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
             epoch_kl_divergence += kl_divergence.item()
 
             # Pasada hacia atrás
-            #kl_divergence.backward()
-            kl_divergence.backward() # PRobamos la mae
+            kl_divergence.backward()
             # Actualizar los parámetros
             optimizer.step()
 
@@ -374,17 +431,17 @@ def main():
     train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
     
     # Si vamos a utilizar histogramas debemos definir el dataset de entrenamiento de esta forma:
     train_dataset_hist = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True,hist=True)
-    train_dataloader_hist = DataLoader(train_dataset_hist,batch_size=64,shuffle=True,pin_memory=True,num_workers=6,persistent_workers=True)
+    train_dataloader_hist = DataLoader(train_dataset_hist,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
     val_dataset_hist = CustomImageDataset("./fotos_recortadas",val,True,hist=True)
-    val_dataloader_hist = DataLoader(val_dataset_hist,batch_size=64,shuffle=False,pin_memory=True,num_workers=6,persistent_workers=True)
+    val_dataloader_hist = DataLoader(val_dataset_hist,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    #complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
     # Para VisionT
     #complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
@@ -430,11 +487,88 @@ Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - we
     Divergencia KL: 0.2381 , MAE Loss: 0.0350
     MAE por clases: 0.0727 | 0.0070 | 0.0193 | 0.1186 | 0.0468 | 0.0056 | 0.0548 | 0.0135 | 0.0051 | 0.0071
     MAE por clases: 0.1070 | 0.1002 | 0.1458 | 0.1545 | 0.1520 | 0.0619 | 0.1419 | 0.1175 | 0.0265 | 0.1747 - solo en imágenes en las que aparecen
+
     
 
+!!!! PROBAMOS A REDUCIR EL LABEL SMOOTHING PARA PREDICCIONES MÁS PRECISAS   ------------------------------
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0
+
+
+
+
+!!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL   -   Mucho overfitting
+Usando class smoothing de 0 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 0.3341 , MAE Loss: 0.0492
+    MAE por clases: 0.0973 | 0.0157 | 0.036 | 0.1467 | 0.0645 | 0.0143 | 0.062 | 0.017 | 0.0171 | 0.0214
+    MAE por clases: 0.1468 | 0.1468 | 0.172 | 0.2006 | 0.1646 | 0.0552 | 0.1495 | 0.13 | 0.0024 | 0.0698 - solo en imágenes en las que aparecen
+
+    
+!!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL   ----------------------------
+Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+
+
+
+!!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL 
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 0.2502 , MAE Loss: 0.0365
+    MAE por clases: 0.0728 | 0.0068 | 0.0196 | 0.1252 | 0.0524 | 0.0059 | 0.0565 | 0.0132 | 0.0053 | 0.0073
+    MAE por clases: 0.1068 | 0.1089 | 0.1552 | 0.1592 | 0.1665 | 0.0592 | 0.1443 | 0.121 | 0.030 | 0.1866 - solo en imágenes en las que aparecen
+
+ 
+    
+  #  La divergencia kl tiene un sobreajuste muy grande pero la MAE tiene muy poco sobreajuste, se puede probar a reducir las tecnicas que evitan el overfitting o usar la WMAE como función de pérdida ##
 !!!! Probamosa quitar el suavizado a la hora de calcular los pesos, se calculan las prevalencias tal cual y serán los pesos que se usen
- Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01    
+Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 0.2971 , MAE Loss: 0.0442
+    MAE por clases: 0.085 | 0.0126 | 0.0307 | 0.136 | 0.0607 | 0.0123 | 0.0592 | 0.0162 | 0.0141 | 0.0152
+    MAE por clases: 0.1263 | 0.121 | 0.169 | 0.1898 | 0.1477 | 0.0628 | 0.1476 | 0.1202 | 0.0065 | 0.1082 - solo en imágenes en las que aparecen
+  
+
+  ## En este caso vemos que las clases más frecuentes tienen resultados mejores pero las clases mas infrecuentes tiene peor mae ##
+!!!! Probamosa a usar la KLD sin pesos, la definición normal de la función de pérdida
+Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 0.2488 , MAE Loss: 0.0339
+    MAE por clases: 0.0717 | 0.0049 | 0.0158 | 0.1188 | 0.0443 | 0.0049 | 0.0559 | 0.0131 | 0.0036 | 0.0063
+    MAE por clases: 0.1035 | 0.1107 | 0.1591 | 0.1593 | 0.1501 | 0.0668 | 0.1493 | 0.135 | 0.0336 | 0.195 - solo en imágenes en las que aparecen
+
+
+!!!! Probamosa a usar la MAE sin pesos como función de pérdida
+Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Modelo de red multiregresión MRConvolutional_ConvNeXt_tiny.
+    Divergencia KL: 0.9909 , MAE Loss: 0.0387
+    MAE por clases: 0.0898 | 0.0147 | 0.0149 | 0.1264 | 0.0486 | 0.0031 | 0.0647 | 0.0208 | 0.0005 | 0.0037
+    MAE por clases: 0.1181 | 0.6285 | 0.2245 | 0.1735 | 0.1786 | 0.0870 | 0.1880 | 0.2541 | 0.0367 | 0.2140 - solo en imágenes en las que aparecen
+
+!!!! Probamosa a usar la WMAE, CON pesos como función de pérdida pero sin class smoothing
+Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    Divergencia KL: 3.2336 , MAE Loss: 0.0606
+    MAE por clases: 0.1272 | 0.0145 | 0.0151 | 0.2148 | 0.121 | 0.0049 | 0.065 | 0.0393 | 0.0004 | 0.0035
+    MAE por clases: 0.1266 | 0.6286 | 0.228 | 0.1486 | 0.6664 | 0.1837 | 0.1993 | 0.5174 | 0.0367 | 0.214 - solo en imágenes en las que aparecen
+
+!!!! Probamosa a usar la WMAE, CON pesos como función de pérdida CON class smoothing
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+Modelo de red multiregresión MRConvolutional_ConvNeXt_tiny.
+    Divergencia KL: 3.1400 , MAE Loss: 0.0594
+    MAE por clases: 0.1162 | 0.0145 | 0.0151 | 0.2175 | 0.121 | 0.0049 | 0.0615 | 0.0393 | 0.0004 | 0.0036
+    MAE por clases: 0.1199 | 0.6286 | 0.2278 | 0.1445 | 0.6663 | 0.1835 | 0.1862 | 0.5171 | 0.0367 | 0.214 - solo en imágenes en las que aparecen
+
+!!!! Probamosa a usar la WMAE, CON pesos como función de pérdida SIN class smoothing y SIN escalar los pesos
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+Modelo de red multiregresión MRConvolutional_ConvNeXt_tiny.    
+    Divergencia KL: 3.1274 , MAE Loss: 0.0604
+    MAE por clases: 0.1286 | 0.0145 | 0.0151 | 0.2135 | 0.121 | 0.0049 | 0.0634 | 0.0393 | 0.0004 | 0.0035
+    MAE por clases: 0.1307 | 0.6286 | 0.228 | 0.1507 | 0.6664 | 0.1837 | 0.1934 | 0.5174 | 0.0367 | 0.214 - solo en imágenes en las que aparecen
+
 
 
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
@@ -452,7 +586,8 @@ Usando class smoothing de 0.25 - Añadiendo dropout justo antes de la salida - w
 
 
 
---- BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
+------ BASE CONVOLUCIONAL CON HISTOGRAMA (DOS BLOQUES):
+
 Usando class smoothing de 0.15 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=1.5e-3,lr2=2e-5,dropout=0.3,batch_size=64 - size1=896,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
     Divergencia KL: 0.2614 , MAE Loss: 0.0387
@@ -471,8 +606,23 @@ Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - we
     MAE por clases: 0.0749 | 0.006 | 0.0205 | 0.1242 | 0.0492 | 0.0065 | 0.0543 | 0.0149 | 0.0051 | 0.0082
     MAE por clases: 0.1096 | 0.0711 | 0.1433 | 0.1578 | 0.1618 | 0.0569 | 0.1435 | 0.1245 | 0.0297 | 0.1733 - solo en imágenes en las que aparecen
 
+    
+    
+!!!! MODELO DE HISTOGRAMA Clasico CON NORMALIZACION GLOBAL - !!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL   ----------------------------
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
+    
 
-!!!! Baseline antigua - MAS OVERFITTING
+
+!!!!! Prueba del modelo de histograma colocando las capas después del primer bloque convolucional de la base.
+Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
+"ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01    
+    Divergencia KL: 0.2399 , MAE Loss: 0.0365
+    MAE por clases: 0.0756 | 0.0073 | 0.0214 | 0.1214 | 0.0505 | 0.0067 | 0.056 | 0.0139 | 0.0051 | 0.0073
+    MAE por clases: 0.1099 | 0.1211 | 0.1574 | 0.1534 | 0.1474 | 0.0519 | 0.1453 | 0.1137 | 0.0269 | 0.184 - solo en imágenes en las que aparecen
+
+
+! Baseline antigua - MAS OVERFITTING
 Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8e-4,lr2=4e-5,dropout=0.4,batch_size=64 - size1=512,size2=128,patience1=10,patience2=25,max_epochs1=25,max_epochs2=100,label_smoothing=0.01
     Divergencia KL: 0.2562 , MAE Loss: 0.0379
