@@ -87,11 +87,11 @@ class MRConvolutionalModel(nn.Module):
             x_reduced = x_reduced.mT
 
             ## Pasada por la capa de Histograma ##
-            x_hist = self.histogram(x_reduced)
-            x_hist = self.hist_proj(x_hist)
+            x_hist_reduced = self.histogram(x_reduced)
+            x_hist_reduced = self.hist_proj(x_hist_reduced)
 
             # Concatenamos la salida de la red con la salida del histograma (Revisar)
-            x_def = torch.cat([x_conv,x_hist],dim=1)
+            x_def = torch.cat([x_conv,x_hist_reduced],dim=1)
         else:
             x_def = x_conv
             
@@ -184,7 +184,7 @@ class MRVisionTransformer(nn.Module):
             x_hist = self.histogram(x_norm)
             x_hist = self.hist_proj(x_hist)
 
-            # Concatenamos la salida de la red con la salida del histograma (Revisar)
+            # Concatenamos la salida de la red con la salida del histograma
             x_def = torch.cat([x_conv,x_hist],dim=1)
         else:
             x_def = x_conv

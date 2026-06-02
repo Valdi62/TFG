@@ -210,8 +210,8 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     mae_loss_module = nn.L1Loss()
 
     # El valor del smoothing es importante ajustarlo para que le dé peso a las clases raras pero no ignore las clases comunes por culpa de esto
-    #class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
-    class_weights = calculate_proportion_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
+    class_weights = calculate_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
+    #class_weights = calculate_proportion_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
     kl_divergence_module = WeightedKLDivLoss(class_weights,reduction="batchmean")
     
 
@@ -426,12 +426,25 @@ def main():
     # El de test lo usaremos más tarde para comparar y no ahora para entrenar
 
     # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
-    train_dataset_def = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True)
+    train_dataset = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True)
     val_dataset = CustomImageDataset("./fotos_recortadas",val,True)
-    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
+    train_dataloader = DataLoader(train_dataset,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+
+
+    # Creamos un conjunto combinado de train y val para el último entrenamiento completo, comprobaremos su rendimiento
+    train_def = pd.concat([train,val],ignore_index=True)
+    val_def = pd.read_csv("./dataset_dividido/test.csv")
+    # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
+    train_dataset_def = CustomImageDataset("./fotos_recortadas",train_def,True,augmentation=True)
+    val_dataset_def = CustomImageDataset("./fotos_recortadas",val_def,True)
+    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
+    val_dataloader_def = DataLoader(val_dataset_def,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
+
+
+
+    #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader_def,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
     #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
     
     # Si vamos a utilizar histogramas debemos definir el dataset de entrenamiento de esta forma:
@@ -440,14 +453,20 @@ def main():
     val_dataset_hist = CustomImageDataset("./fotos_recortadas",val,True,hist=True)
     val_dataloader_hist = DataLoader(val_dataset_hist,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    # Creamos los dataloaders finales con train+val 
+    train_dataset_hist_def = CustomImageDataset("./fotos_recortadas",train_def,True,augmentation=True,hist=True)
+    train_dataloader_hist_def = DataLoader(train_dataset_hist_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
+    val_dataset_hist_def = CustomImageDataset("./fotos_recortadas",val_def,True,hist=True)
+    val_dataloader_hist_def = DataLoader(val_dataset_hist_def,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
+
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist_def,val_dataloader_hist_def,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+                     size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
     # Para VisionT
-    #complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader_def,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
+    #complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
     #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
-    #complete_training("MRVisionTransformer","DINOv2_ViT_B","AdamW",train_dataloader_def,val_dataloader,lr1=5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    #complete_training("MRVisionTransformer","DINOv2_ViT_B","AdamW",train_dataloader,val_dataloader,lr1=5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
     #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
@@ -493,7 +512,10 @@ Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - we
 !!!! PROBAMOS A REDUCIR EL LABEL SMOOTHING PARA PREDICCIONES MÁS PRECISAS   ------------------------------
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0
-
+Modelo de red multiregresión MRConvolutional_ConvNeXt_tiny.
+    Divergencia KL: 0.2736 , MAE Loss: 0.0386
+    MAE por clases: 0.0764 | 0.0062 | 0.0203 | 0.1322 | 0.0564 | 0.0073 | 0.0579 | 0.0167 | 0.0056 | 0.0067
+    MAE por clases: 0.109 | 0.0944 | 0.1679 | 0.1727 | 0.163 | 0.0712 | 0.1484 | 0.1317 | 0.0311 | 0.1815 - solo en imágenes en las que aparecen
 
 
 
@@ -508,7 +530,9 @@ Usando class smoothing de 0 - Añadiendo dropout justo antes de la salida - weig
 !!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL   ----------------------------
 Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
-
+    Divergencia KL: 0.2616 , MAE Loss: 0.0396
+    MAE por clases: 0.0776 | 0.0069 | 0.0229 | 0.1337 | 0.057 | 0.0073 | 0.0595 | 0.0161 | 0.0066 | 0.0079
+    MAE por clases: 0.1147 | 0.0914 | 0.171 | 0.1706 | 0.1772 | 0.0517 | 0.1455 | 0.1333 | 0.0279 | 0.1784 - solo en imágenes en las que aparecen
 
 
 !!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL 
@@ -611,7 +635,9 @@ Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - we
 !!!! MODELO DE HISTOGRAMA Clasico CON NORMALIZACION GLOBAL - !!!!! NUEVO MÉTODO PARA CALCULAR PESOS EN FUNCIÓN DE LA PROPORCIÓN GENERAL RESPECTO DEL TOTAL   ----------------------------
 Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
 "ConvNeXt_tiny","AdamW" - lr1=8.5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01
-    
+   Divergencia KL: 0.2457 , MAE Loss: 0.0369
+    MAE por clases: 0.0755 | 0.0061 | 0.0195 | 0.126 | 0.052 | 0.0052 | 0.0571 | 0.0154 | 0.0052 | 0.0073
+    MAE por clases: 0.1103 | 0.1109 | 0.1563 | 0.1575 | 0.1626 | 0.0495 | 0.1482 | 0.1282 | 0.0318 | 0.1755 - solo en imágenes en las que aparecen 
 
 
 !!!!! Prueba del modelo de histograma colocando las capas después del primer bloque convolucional de la base.
