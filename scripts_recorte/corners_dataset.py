@@ -29,15 +29,15 @@ class CustomImageDataset(Dataset):
         'y1'          - posición de y de la primera esquina
         'x2'          - posición de x de la segunda esquina
         ...
-    Se continuan los campos de coordenadas hasta y4 que tiene la posición y de la cuarta esquina
+    Se continuan los campos de coordenadas hasta y4 que indica la coordenada Y de la cuarta esquina
     """
-    def __init__(self, images_dir, df, train=False):
+    def __init__(self,images_dir,df,train=False):
         self.images_dir = images_dir
         self.images = df["image"].values
         self.transform = transforms.Compose([
-                         transforms.Resize((270, 480)), # Transforma el tamaño de las imagenes
-                         transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1 para la normalización posterior
-                         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
+                         transforms.Resize((270,480)), # Transforma el tamaño de las imagenes
+                         transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1
+                         transforms.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225]) # Realizamos la misma normalización que se aplica a las imagenes de imagenet
                          ])
         # Obtenemos las etiquetas solo si queremos usar el dataset para el entrenamiento
         self.train = train
@@ -52,10 +52,10 @@ class CustomImageDataset(Dataset):
         img_path = f"{self.images_dir}/{image_name}"
         image = read_image(img_path) # De esta forma se pasan directamente a tensor
 
-        # Image.shape[0] son el numero de canales
+        # Image.shape[0] es el numero de canales
         if image.shape[2] < image.shape[1]: # Rotamos si está en vertical
-            image = rotate(image, 90, expand=True)
-        if self.transform: # Aplicamos las transformaciones de tamaño
+            image = rotate(image,90,expand=True)
+        if self.transform: # Aplicamos las transformaciones de tamaño y normalización
             image = self.transform(image)
 
         # Comprobamos si tenemos las etiquetas para devolver el conjunto completo para entreamiento o solo las imágenes
@@ -68,15 +68,15 @@ class CustomImageDataset(Dataset):
             # Normalizamos las coordenadas en función de estas dimensiones fijas porque son las que se usaro durante su etiquetado
             # es decir todas las fotos se rotaron y ajustaron en tamaño antes de etiquetarlas
             coords = torch.tensor(coords)
-            coords = coords/np.array([1920,1080]*4,dtype=np.float32)
-            return image,{"classification": has_corners, "coordinates": coords}
+            coords = coords/torch.tensor([1920,1080]*4,dtype=torch.float32)
+            return image,{"classification":has_corners,"coordinates":coords}
         else:
             return image,image_name
     
 def corners_dataset(df,target_col,out_dir,train_size=0.7):
     """
     Función para dividir un conjunto de datos en formato data frame de pandas en conjuntos de train, val y test que se almacenarán como 
-    documentos csv en un directorio de salida elegido con esos nombres y '_crop' añadido.
+    documentos csv en un directorio de salida elegido con esos nombres y '_crop' añadido al final.
 
     Parámetros:
         df           - data frame con los registros a separar por conjuntos
@@ -91,8 +91,8 @@ def corners_dataset(df,target_col,out_dir,train_size=0.7):
     os.makedirs(out_dir,exist_ok=True)
 
     # Dividimos los ejemplos entre conjuntos de train, val y test
-    train,trial=sklearn.model_selection.train_test_split(df, test_size=1-train_size,stratify=df[target_col],random_state = 67)
-    val,test=sklearn.model_selection.train_test_split(trial, test_size=0.5,stratify=trial[target_col],random_state = 67)
+    train,trial=sklearn.model_selection.train_test_split(df,test_size=1-train_size,stratify=df[target_col],random_state = 67)
+    val,test=sklearn.model_selection.train_test_split(trial,test_size=0.5,stratify=trial[target_col],random_state = 67)
 
     # Almacenamos los dataframes en formato csv
     train.to_csv(f"{out_dir}/train_crop.csv",index=False)

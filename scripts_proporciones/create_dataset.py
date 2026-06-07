@@ -53,10 +53,11 @@ class CustomImageDataset(Dataset):
         self.augmentation = augmentation
         self.hist = hist
 
-        self.transform = transforms.Compose([transforms.Resize((img_size, img_size),interpolation=transforms.InterpolationMode.BICUBIC), # Transforma el tamaño de las imagenes
+        self.transform = transforms.Compose([
+                                            transforms.Resize((img_size, img_size)), # Transforma el tamaño de las imagenes
                                             transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1
                                             ])
-        self.imagenet_norm = transforms.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
+        self.imagenet_norm = transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
 
         # Transformaciones que se van a aplicar para para el data augmentation
         self.augment_transform = transforms.Compose([
@@ -74,7 +75,7 @@ class CustomImageDataset(Dataset):
                                     hue=0.03          # Variación de tono, se elige un valor bajo para no cambiar mucho los colores
                                 )],p=0.3),
                                 transforms.RandomApply([
-                                transforms.GaussianBlur(kernel_size=5,sigma=(0.1, 1.5) # Simulamos ruido gaussiano con efecto borroso
+                                transforms.GaussianBlur(kernel_size=5,sigma=(0.1,1.5) # Simulamos ruido gaussiano con efecto borroso
                                 )],p=0.2)])
 
         # Obtenemos las etiquetas solo si queremos usar el dataset para el entrenamiento

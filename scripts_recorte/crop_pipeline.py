@@ -24,7 +24,7 @@ def click_event(event,x,y,flags,params):
     if event == cv2.EVENT_LBUTTONDOWN and len(puntos)<8:
         puntos.extend((x, y))
         # Dibujamos un círculo para feedback visual inmediato
-        cv2.circle(img_muestra, (x, y), 5, (255, 200, 0), -1)
+        cv2.circle(img_muestra,(x,y),5,(255,200,0),-1)
         cv2.imshow("Imagen", img_muestra)
 
 def ordenar_puntos(puntos):
@@ -35,7 +35,7 @@ def ordenar_puntos(puntos):
     Parámetros:
         'puntos' - lista de formato ["x1","y1","x2","y2","x3","y3","x4","y4"]
     """
-    puntos = np.array(puntos,dtype=np.float32).reshape(4, 2)
+    puntos = np.array(puntos,dtype=np.float32).reshape(4,2)
     centro = np.mean(puntos,axis=0)
 
     # Ordenamos los puntos alrededor de su centro para evitar deformaciones

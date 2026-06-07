@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from sklearn.metrics import precision_score, recall_score
+from sklearn.metrics import precision_score,recall_score
 from tqdm import tqdm
 import pandas as pd
 from torch.optim.lr_scheduler import ReduceLROnPlateau

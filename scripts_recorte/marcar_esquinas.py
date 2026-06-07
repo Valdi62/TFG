@@ -9,17 +9,17 @@ puntos = []
 img = None
 nombre_imagen = None
 
-def click_event(event, x, y, flags, param):
+def click_event(event,x,y,flags,param):
     global puntos, img, nombre_imagen
     if event == cv2.EVENT_LBUTTONDOWN:
-        puntos.append((x, y))
+        puntos.append((x,y))
         # Dibujar el punto
-        cv2.circle(img, (x, y), 5, (0, 0, 255), -1)
-        cv2.imshow("Imagen", img)
+        cv2.circle(img,(x,y),5,(0,0,255),-1)
+        cv2.imshow("Imagen",img)
 
         # Si ya hay 4 puntos: guardar y continuar
         if len(puntos) == 4:
-            with open(salida_csv, mode="a", newline="") as f:
+            with open(salida_csv,mode="a",newline="") as f:
                 writer = csv.writer(f)
                 registro=[nombre_imagen,1]
 
@@ -31,7 +31,7 @@ def click_event(event, x, y, flags, param):
             cv2.destroyAllWindows()
 
     elif event== cv2.EVENT_RBUTTONDOWN:
-        with open(salida_csv, mode="a", newline="") as f:
+        with open(salida_csv,mode="a",newline="") as f:
             writer = csv.writer(f)
             registro=[nombre_imagen,0]
             for i in range(4):
@@ -42,7 +42,7 @@ def click_event(event, x, y, flags, param):
         cv2.destroyAllWindows()
 
 def main():
-    global puntos, img, nombre_imagen
+    global puntos,img,nombre_imagen
     # Carpeta con las imágenes a etiquetar
     dir = "1_photos"
     imagenes = [f for f in os.listdir(dir) if f.endswith((".jpg",".jpeg",".png"))]
@@ -55,7 +55,7 @@ def main():
 
     # Recorremos todas las imágenes
     for nombre_imagen in imagenes:
-        img_path = os.path.join(dir, nombre_imagen)
+        img_path = os.path.join(dir,nombre_imagen)
         img = cv2.imread(img_path)
 
         # Ponemos las imagenes enn horizontal y les damos a todas las mismas dimensiones
@@ -64,8 +64,8 @@ def main():
             img = cv2.rotate(img,cv2.ROTATE_90_COUNTERCLOCKWISE)
         img = cv2.resize(img,(1920,1080))    
         
-        cv2.imshow("Imagen", img)
-        cv2.setMouseCallback("Imagen", click_event)
+        cv2.imshow("Imagen",img)
+        cv2.setMouseCallback("Imagen",click_event)
 
         # Si presionamos escape se acaba la ejecución del programa
         key = cv2.waitKey(0) & 0xFF
