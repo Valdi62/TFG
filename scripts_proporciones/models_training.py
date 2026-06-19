@@ -173,7 +173,6 @@ def validation(model,val_dataloader,label_smoothing=0.01,device="cpu"):
 
             # Vamos a evitar que las etiquetas tengan el valor exacto 0 para evitar que la divergencia kl colapse
             smooth_labels = data_labels*(1-label_smoothing)+label_smoothing/10
-
             log_preds = model(data_inputs,data_histogram)
 
             # Calcular el valor de la función de pérdida mae y la divergencia kl
@@ -214,7 +213,6 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     #class_weights = calculate_proportion_class_weights(train_dataloader,n_classes=10,smoothing=0.3,device=device)
     kl_divergence_module = WeightedKLDivLoss(class_weights,reduction="batchmean")
     
-
     # Vamos a filtrar los parámetros que no están congelados para solo pasarle los que sean estrictamente necesarios al optimizador
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     # Elegimos el optimizador deseado con su learning rate
@@ -397,11 +395,11 @@ Primera prueba - modelo base congelado y solo entrenamos la cabeza
     Divergencia KL: 0.2967 , MAE Loss: 0.0397
     MAE por clases: 0.0737 | 0.0078 | 0.025 | 0.1254 | 0.052 | 0.0077 | 0.0721 | 0.015 | 0.008 | 0.0099
 
-Divergencia KL: 0.2400 , MAE Loss: 0.0356
-    MAE por clases: 0.0721 | 0.0068 | 0.0184 | 0.1213 | 0.0507 | 0.0058 | 0.0566 | 0.0129 | 0.005 | 0.007
-    MAE por clases: 0.1102 | 0.0957 | 0.127 | 0.1617 | 0.1554 | 0.0616 | 0.1447 | 0.0939 | 0.0265 | 0.1862 - solo en imágenes en las que aparecen
+Segunda prueba - primera fase con el modelo base congelado y segunda fase descongelando
+    Divergencia KL: 0.2381 , MAE Loss: 0.0350
+    MAE por clases: 0.0727 | 0.0070 | 0.0193 | 0.1186 | 0.0468 | 0.0056 | 0.0548 | 0.0135 | 0.0051 | 0.0071
 
-Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
+Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas 
     Divergencia KL: 0.3084 , MAE Loss: 0.0422
     MAE por clases: 0.0891 | 0.0111 | 0.0165 | 0.1347 | 0.057 | 0.0151 | 0.0659 | 0.0187 | 0.006 | 0.0077
 
@@ -431,8 +429,6 @@ def main():
     train_dataloader = DataLoader(train_dataset,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-
-
     # Creamos un conjunto combinado de train y val para el último entrenamiento completo, comprobaremos su rendimiento
     train_def = pd.concat([train,val],ignore_index=True)
     val_def = pd.read_csv("./dataset_dividido/test.csv")
@@ -441,8 +437,6 @@ def main():
     val_dataset_def = CustomImageDataset("./fotos_recortadas",val_def,True)
     train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
     val_dataloader_def = DataLoader(val_dataset_def,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
-
-
 
     #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader_def,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
     #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
@@ -462,12 +456,7 @@ def main():
     complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist_def,val_dataloader_hist_def,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
-    # Para VisionT
-    #complete_training("MRVisionTransformer","Swin_V2_S","AdamW",train_dataloader,val_dataloader,lr1=8e-4,lr2=2e-5,dropout=0.4,fine_tuning=True,
-    #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
-    #complete_training("MRVisionTransformer","DINOv2_ViT_B","AdamW",train_dataloader,val_dataloader,lr1=5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-    #                  size1=512,size2=384,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
 if __name__ == "__main__":
     main()

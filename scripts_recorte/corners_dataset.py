@@ -18,7 +18,7 @@ class CustomImageDataset(Dataset):
     Parámetros:
         'images_dir'  - ruta del directorio que contiene las fotos recortadas
         'df'          - data frame que contiene los nombres
-        'train'       - valor booleano que indica si el dataset se usará para el entrenamiento o no
+        'train'       - valor booleano que indica si se tienen etiquetas para procesos de entrenamiento o validación
     
     El formato del data frame es el siguiente.
     Columna obligatoria:
@@ -47,7 +47,7 @@ class CustomImageDataset(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx):
+    def __getitem__(self,idx):
         image_name=self.images[idx]
         img_path = f"{self.images_dir}/{image_name}"
         image = read_image(img_path) # De esta forma se pasan directamente a tensor
@@ -64,7 +64,6 @@ class CustomImageDataset(Dataset):
             coords = self.labels[idx][1:]
             has_corners = torch.tensor(has_corners)
 
-            ###   IMPORTANTE   ###
             # Normalizamos las coordenadas en función de estas dimensiones fijas porque son las que se usaro durante su etiquetado
             # es decir todas las fotos se rotaron y ajustaron en tamaño antes de etiquetarlas
             coords = torch.tensor(coords)

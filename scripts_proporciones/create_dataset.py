@@ -31,6 +31,7 @@ class CustomImageDataset(Dataset):
         'train'             - valor booleano que indica si el dataset se usará para el entrenamiento o no (puede ser para validación o test también)
         'img_size'          - valor numérico que indica el tamaño final que tendrán las imágenes del dataset
         'augmentation'      - valor booleano que indica si queremos aplicar data augmentation al conjunto de datos 
+        'hist'              - valor booleano que indica si se va a trabajar con la capa de histograma o no
 
     El formato del data frame es el siguiente.
     Columna obligatoria:
@@ -115,7 +116,7 @@ class CustomImageDataset(Dataset):
         if self.augmentation: # Si queremos hacer data augmentation aplicamos aleatoriamente transformaciones
             image = self.augment_transform(image)
 
-        # Aplicamos las transformaciones de normalización
+        # Aplicamos las transformaciones
         image = self.transform(image)
         image_norm = self.imagenet_norm(image)
 

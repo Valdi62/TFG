@@ -38,7 +38,7 @@ class TransferLearning(nn.Module):
                                     nn.ReLU()
                                     )
 
-        self.clas= nn.Sequential(
+        self.clas = nn.Sequential(
                             nn.Linear(size2,1) # No necesitamos usar una activacion sigmoide porque usamos BCE con logits
                                 )
         self.reg = nn.Sequential(

@@ -109,7 +109,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
         history_bce = {"train_bce":[],"val_bce":[]}
         history_corners = {"accuracy":[],"precision":[],"recall":[]}
 
-    # Como función de pérdida para representar  las coordenadas usamos la MSE loss para penalizar errores grandes y porque tras el etiquetado manual de los datos
+    # Como función de pérdida para representar las coordenadas usamos la MSE loss para penalizar errores grandes y porque tras el etiquetado manual de los datos
     #  no existen muchos outliers
     loss_module_coords = nn.MSELoss()
     # Siempre vamos a comprobar el MAE de las coordenadas en training
@@ -124,11 +124,11 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
     if opt == "SGD":
         optimizer = torch.optim.SGD(trainable_params,lr=learning_rate,momentum=0.9)
     elif opt == "AdamW":
-        optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
+        optimizer = torch.optim.AdamW(trainable_params,lr=learning_rate)
     elif opt == "RMSprop":
-        optimizer = torch.optim.RMSprop(trainable_params, lr=learning_rate)
+        optimizer = torch.optim.RMSprop(trainable_params,lr=learning_rate)
     elif opt == "Adam":
-        optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
+        optimizer = torch.optim.Adam(trainable_params,lr=learning_rate)
     else:
         raise ValueError(f"El optimizado {opt} no está soportado, elija uno entre ['SGD','AdamW','Adam','RMSprop']")
 
@@ -184,7 +184,7 @@ def train_model(model,opt,train_dataloader,val_dataloader,patience=5,max_epochs=
                 reg_pred_corners = preds["coordinates"][has_corners_mask]
                 reg_true_corners = data_coords_labels[has_corners_mask]
                 
-                loss_coords = loss_module_coords(reg_pred_corners, reg_true_corners)
+                loss_coords = loss_module_coords(reg_pred_corners,reg_true_corners)
                 # Multiplicamos por el número de fotos con esquinas para luego hacer que sea proporcional al número de ejemplos positivos
                 epoch_coords_loss += loss_coords.item()*positives_in_batch
                 epoch_mae_loss += mae_loss(reg_pred_corners, reg_true_corners).item()*positives_in_batch
@@ -317,8 +317,8 @@ Segunda prueba - primera fase con el modelo base congelado y una segunda fase do
 Test Corners BCE 0.1311, Test MSE 0.0032, Test MAE 0.0431
 Accuracy 98.88%, Precision 98.82%, Recall 100.00%
 
-Tercera prueba - directamente entrenar una fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
-Test Corners BCE 0.1605, Test MSE 0.0008, Test MAE 0.0175
+Tercera prueba - directamente entrenar una sola fase con la cabeza y las últimas capas del modelo base descongeladas y el resto congelado
+Test Corners BCE 0.1752, Test MSE 0.0010, Test MAE 0.0174
 Accuracy 98.88%, Precision 98.82%, Recall 100.00%
 
 Parece que empezar con esas capas ya descongeladas y entrenar directamente el modelo completo es mejor que dividirlo en dos fases,
@@ -345,27 +345,24 @@ def main():
     # Creamos los datasets y dataloaders que vamos a usar para entrenar y validar
     train_dataset = CustomImageDataset("./1_photos",train,True)
     val_dataset = CustomImageDataset("./1_photos",val,True)
-    train_dataloader = DataLoader(train_dataset,batch_size=16,shuffle=True,pin_memory=True,num_workers=2)
-    val_dataloader = DataLoader(val_dataset,batch_size=32,shuffle=False,pin_memory=True,num_workers=2)
+    train_dataloader = DataLoader(train_dataset,batch_size=32,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
+    val_dataloader = DataLoader(val_dataset,batch_size=32,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
     # Definimos el modelo ganador con los valores que mejor funcionan
     model = TransferLearning("EfficientNet_B3",0.4,896,384).to(device)
     # Descongelamos sus últimas capas
     layers = list(model.model.features[-3:].parameters())
     for param in layers:
-        param.requires_grad=True
+       param.requires_grad=True
     
-    # Realizamos el entrenamiento del modelo primero con el conjunto de train y val para comprobar su rendimiento en test
-    train_model(model,"AdamW",train_dataloader,val_dataloader,patience=30,max_epochs=120,coords_weights=10,corners_weights=1,
+    #complete_training_crop("EfficientNet_B3","AdamW",train_dataloader,val_dataloader,coords_weights=10,corners_weights=1,lr1=1e-3,lr2=1e-5,dropout=0.4,
+    #                    size1=896,size2=384,patience1=20,patience2=30,max_epochs1=55,max_epochs2=65,fine_tuning=True,device=device,callback=None)
+
+    # Realizamos el entrenamiento del modelo con el conjunto de train y val para comprobar su rendimiento en test
+    train_model(model,"AdamW",train_dataloader,val_dataloader,patience=20,max_epochs=150,coords_weights=10,corners_weights=1,
                 learning_rate=1e-3,device=device,fine_tuning=True)
+    
     
 
 if __name__ == "__main__":
     main()
-
-"""
-Evaluación final
-
-Test Corners BCE 0.1605, Test MSE 0.0008, Test MAE 0.0175
-Accuracy 98.88%, Precision 98.82%, Recall 100.00%
-"""
