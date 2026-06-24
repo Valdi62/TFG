@@ -368,16 +368,6 @@ def complete_training(model_type,model_name,opt_name,train_dataloader,val_datalo
             # En estas redes hay un bloques de normalización que deberían ir descongelados junto con el último
             layers = list(model.model.features[-2:].parameters())
 
-        # Para los vision transformers
-        elif model_name == "ViT_B_16":
-            # Descongelamos el último bloque de transformer y la capa de normalización final
-            layers = list(model.model.encoder.layers[-1].parameters()) + list(model.model.encoder.ln.parameters())
-        elif model_name == "Swin_V2_S":
-            layers = list(model.model.features[-2:].parameters())
-        elif model_name == "DINOv2_ViT_B":
-            # Descongelamos el último bloque de transformer y la capa de normalización final
-            layers = list(model.model.blocks[-1].parameters()) + list(model.model.norm.parameters())
-
         for param in layers:
             param.requires_grad=True
         obj_loss,_ = train_model(model,opt_name,train_dataloader,val_dataloader,patience2,max_epochs2,lr2,label_smoothing,
@@ -429,17 +419,8 @@ def main():
     train_dataloader = DataLoader(train_dataset,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
     val_dataloader = DataLoader(val_dataset,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    # Creamos un conjunto combinado de train y val para el último entrenamiento completo, comprobaremos su rendimiento
-    train_def = pd.concat([train,val],ignore_index=True)
-    val_def = pd.read_csv("./dataset_dividido/test.csv")
-    # Creamos los datasets y dataloaders definitivos que vamos a usar para entrenar y validar
-    train_dataset_def = CustomImageDataset("./fotos_recortadas",train_def,True,augmentation=True)
-    val_dataset_def = CustomImageDataset("./fotos_recortadas",val_def,True)
-    train_dataloader_def = DataLoader(train_dataset_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
-    val_dataloader_def = DataLoader(val_dataset_def,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
-
-    #complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader_def,val_dataloader_def,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
-    #                  size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
+    complete_training("MRConvolutional","ConvNeXt_tiny","AdamW",train_dataloader,val_dataloader,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
     
     # Si vamos a utilizar histogramas debemos definir el dataset de entrenamiento de esta forma:
     train_dataset_hist = CustomImageDataset("./fotos_recortadas",train,True,augmentation=True,hist=True)
@@ -447,13 +428,7 @@ def main():
     val_dataset_hist = CustomImageDataset("./fotos_recortadas",val,True,hist=True)
     val_dataloader_hist = DataLoader(val_dataset_hist,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
 
-    # Creamos los dataloaders finales con train+val 
-    train_dataset_hist_def = CustomImageDataset("./fotos_recortadas",train_def,True,augmentation=True,hist=True)
-    train_dataloader_hist_def = DataLoader(train_dataset_hist_def,batch_size=64,shuffle=True,pin_memory=True,num_workers=4,persistent_workers=True)
-    val_dataset_hist_def = CustomImageDataset("./fotos_recortadas",val_def,True,hist=True)
-    val_dataloader_hist_def = DataLoader(val_dataset_hist_def,batch_size=64,shuffle=False,pin_memory=True,num_workers=4,persistent_workers=True)
-
-    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist_def,val_dataloader_hist_def,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
+    complete_training("MRConvolutional_Hist","ConvNeXt_tiny","AdamW",train_dataloader_hist,val_dataloader_hist,lr1=8.5e-4,lr2=1e-5,dropout=0.4,fine_tuning=True,
                      size1=640,size2=192,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01,device=device)
 
 
@@ -645,29 +620,4 @@ Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - we
     MAE por clases: 0.1157 | 0.0172 | 0.0714 | 0.1711 | 0.1349 | 0.0247 | 0.1505 | 0.0622 | 0.0065 | 0.0573 - solo en imágenes en las que aparecen  
 
     
-
-
---- BASE VisionT SIN HISTOGRAMA (DOS BLOQUES):
-Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"Swin_V2_S","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
-    Divergencia KL: 0.2595 , MAE Loss: 0.0403
-    MAE por clases: 0.0771 | 0.0079 | 0.0239 | 0.1334 | 0.0546 | 0.0102 | 0.0622 | 0.0169 | 0.0076 | 0.0089
-    MAE por clases: 0.1201 | 0.021 | 0.0551 | 0.1799 | 0.1002 | 0.0188 | 0.1489 | 0.0879 | 0.0059 | 0.0595 - solo en imágenes en las que aparecen
-
-
-Usando class smoothing de 0.3 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"Swin_V2_S","AdamW" - lr1=8e-4,lr2=2e-5,dropout=0.3,batch_size=64 - size1=512,size2=128,patience1=15,patience2=25,max_epochs1=50,max_epochs2=100,label_smoothing=0.01 
-       
-
-
-Usando class smoothing de 0.2 - Añadiendo dropout justo antes de la salida - weight_decay=0.05 
-"DINOv2_ViT_B","AdamW" - lr1=5e-4,lr2=1e-5,dropout=0.4,batch_size=64 - size1=512,size2=384,patience1=15,patience2=20,max_epochs1=50,max_epochs2=100,label_smoothing=0.01  
-    Divergencia KL: 0.2719 , MAE Loss: 0.0405
-    MAE por clases: 0.0807 | 0.0094 | 0.022 | 0.1345 | 0.0619 | 0.0079 | 0.0563 | 0.0153 | 0.0101 | 0.0071
-    MAE por clases: 0.1272 | 0.0284 | 0.0417 | 0.1797 | 0.1596 | 0.0194 | 0.1255 | 0.0746 | 0.0102 | 0.0541 - solo en imágenes en las que aparecen
-
-
---- BASE VisionT CON HISTOGRAMA (DOS BLOQUES):
-
-
 """
