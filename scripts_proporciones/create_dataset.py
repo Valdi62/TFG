@@ -8,9 +8,11 @@ import pandas as pd
 import os
 import random
 
+## Código con la clase del dataset y la función para dividir el conjunto de datos en train/val/test
+
 class RandomRotation(torch.nn.Module):
     """
-    Clase que se utilizará para realizar rotaciones aleatorias de múltiplos de 90 grados en caso de aplicar data augmentation.
+    Esta clase se utiliza para realizar rotaciones aleatorias de múltiplos de 90 grados al aplicar data augmentation.
     """
     def forward(self,x):
         angle = random.choice([0,90,180,270]) # Puede darse el caso de que la imagen no rote
@@ -18,12 +20,9 @@ class RandomRotation(torch.nn.Module):
 
 class CustomImageDataset(Dataset):
     """ 
-    Clase que construye el dataset preprocesado a partir de un directorio con imágenes y un data frame con los nombres de las imagenes que opcionalmente 
-    tendrá etiquetas para cada imagen junto con las coordenadas de las esquinas en dichas imágenes en caso de querer usarse para el entrenamiento del modelo.
-    El preprocesado se realiza de la misma forma que los ejemplos usados en el entrenamiento para poder pasar el dataset directamente por la red y obtener 
-    resultados coheretes. En caso de que el dataset tenga los campos de etiquetas y coordenadas deberá especificarse el campo train de la clase.
-    Las transformaciones que se le apliquen a las imágenes al crear el dataset no se deben modificar puesto que tienen que coincidir con las que se aplicaron
-    a las imágenes que se usaron en el entrenamiento de los modelos, por tanto no hay un parámetro de entrada para modificarlas.
+    Esta clase construye el dataset preprocesado a partir de un directorio con imágenes y un data frame con los nombres de las mismas, que opcionalmente 
+    tendrá también etiquetas para cada imagen con las proporciones de las clases para cada una de estas, en caso de querer usarse en el entrenamiento o validación.
+    En caso de que el dataset tenga los campos de etiquetas y coordenadas deberá especificarse el campo train de la clase.
     
     Parámetros:
         'images_dir'        - ruta del directorio que contiene las fotos recortadas
@@ -56,9 +55,9 @@ class CustomImageDataset(Dataset):
 
         self.transform = transforms.Compose([
                                             transforms.Resize((img_size, img_size)), # Transforma el tamaño de las imagenes
-                                            transforms.ConvertImageDtype(torch.float32), # Convertimos las imagenes a flotantes en el rango 0-1
+                                            transforms.ConvertImageDtype(torch.float32), # Convierte las imagenes a flotantes en el rango 0-1
                                             ])
-        self.imagenet_norm = transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225]) # Realizamos la misma normalización que se hace con las imagenes de imagenet
+        self.imagenet_norm = transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225]) # Realiza la misma normalización que se hace con las imagenes de imagenet
 
         # Transformaciones que se van a aplicar para para el data augmentation
         self.augment_transform = transforms.Compose([
@@ -79,7 +78,7 @@ class CustomImageDataset(Dataset):
                                 transforms.GaussianBlur(kernel_size=5,sigma=(0.1,1.5) # Simulamos ruido gaussiano con efecto borroso
                                 )],p=0.2)])
 
-        # Obtenemos las etiquetas solo si queremos usar el dataset para el entrenamiento
+        # Obtenemos las etiquetas si se quiere usar el dataset para el proceso de entrenamiento
         self.train = train
         self.target_cols = ['n. noltei','z. marina','g. vermiculophylla','sedimento','arena','roca','algas verdes','algas pardas','algas rojas','microfitobentos']
 
@@ -93,30 +92,31 @@ class CustomImageDataset(Dataset):
             # Comprobamos si todas las filas suman 100 o 1
             tot = self.labels.sum(axis=1)
             # Si todas las filas suman 100 dividimos entre dicho valor para que pasen a sumar 1
-            # usamos "np.allclose" para permitir una pequeña tolerancia y que puedan sumar 99.9 o 100.1
+            # Se usa "np.allclose" para permitir una pequeña tolerancia y que puedan sumar 99.9 o 100.1
             if np.allclose(tot,100,atol=0.1):
                 self.labels = self.labels/100
             # Si las filas no sumaban 100 y comprobamos que tampoco suman 1 entonces hay algo incorrecto
-            # Aqui reducimos la tolerancia por trabajar con valores más pequeños
+            # Aqui reducimos la tolerancia por trabajar en el rango 0-1 siendo menor que el 0-100
             elif not np.allclose(tot,1,atol=0.001):
                 raise ValueError("Todas las filas de las etiquetas tienen que sumar 1 o 100 en total")
-            # Si vemos que suman 1 entonces no tenemos que hacer nada
-
         else:
             self.labels = None
             
     def __len__(self):
+        # Se devuelve la longitud del dataset
         return len(self.images)
 
     def __getitem__(self, idx):
+        # Se extrae un elemento concreto del dataset
         image_name = self.images[idx]
         img_path = f"{self.images_dir}/{image_name}"
         image = read_image(img_path) # De esta forma se pasan directamente a tensor
 
-        if self.augmentation: # Si queremos hacer data augmentation aplicamos aleatoriamente transformaciones
+        # Si se utiliza data augmentation se aplican transformaciones aleatorias
+        if self.augmentation: 
             image = self.augment_transform(image)
 
-        # Aplicamos las transformaciones
+        # Se aplican las transformaciones clásicas para tratar con las imágenes
         image = self.transform(image)
         image_norm = self.imagenet_norm(image)
 
@@ -126,8 +126,8 @@ class CustomImageDataset(Dataset):
         else:
             labels = image_name
         
-        # Si queremos usar la capa de histograma en el modelo, necesitamos por un lado las imagenes normalizadas con los valores de imagenet
-        #  para la pasada por la base del modelo, y luego las imagenes simplemente normalizadas entre 0 y 1 para pasar por el dataset
+        # Si queremos usar la capa de histograma en el modelo, se necesita por un lado las imagenes normalizadas con los valores de imagenet,
+        # para la pasada por la base del modelo, y luego las imagenes clásicas simplemente normalizadas entre 0 y 1 para pasar por la capa de histogramas
         if self.hist:
             return image_norm,labels,image
         else:
@@ -137,26 +137,22 @@ class CustomImageDataset(Dataset):
 
 def create_dataset(df,target_cols,out_dir,train_size=0.7):
     """
-    Función para dividir un conjunto de datos en formato data frame de pandas en conjuntos de train, val y test que se almacenarán como 
-    documentos csv en un directorio de salida elegido con esos mismos nombres. En caso de querer añadir imagenes creadas mediante
-    data augmentation a los datasets se deberá indicar y se añadirán tres archivos csv nuevos que incluirán los registros originales
-    asi como los nuevos registros aumentados que tendrán las mismas etiquetas que los originales pero los caracteres 'RE_' delante
-    de el nombre de la foto, esto es asi porque se espera que el nombre de las nuevas imágenes aumentadas se haya construido de 
-    dicha forma.
+    Función para dividir un conjunto de datos en formato data frame de pandas en conjuntos de train, val y test
+    Se almacenarán en formato csv con esos mismos nombres, en un directorio de salida elegido.
 
     Parámetros:
-        df           - data frame con los registros a separar por conjuntos
-        target_cols  - lista con las columnas que conforman las etiquetas
-        out_dir      - nombre del directorio de salida en el que almacenar los datasets divididos
-        train_size   - tamaño del conjunto de entrenamiento (el de validación y el de test siempre será cada uno la mitad del tamaño restante)
-        augmentation - parámetro para indicar si se incluirán imágenes aumentadas o no
-
+        'df'           - data frame con los registros a separar por conjuntos
+        'target_cols'  - lista con las columnas que conforman las etiquetas
+        'out_dir'      - nombre del directorio de salida en el que almacenar los datasets divididos
+        'train_size'   - tamaño del conjunto de entrenamiento (el de validación y el de test siempre será cada uno la mitad del tamaño restante)
     """
-    # Creamos el directorio de salida si no existiera
+    # Se crea el directorio de salida en caso de no existir
     os.makedirs(out_dir,exist_ok=True)
 
-    # Creamos los data frames con train, val y test en un 70/15/15, usaremos los mismos data frames para entrenar y probar todos los modelos que usen este tipo de etiquetas
+    # Creamos los data frames con train, val y test en un 70/15/15
     class_present = (df[target_cols]>0).astype(int).values
+    # Como existe desequilibrio entre clases y algunas aparecen en muy pocas fotos, se utiliza estratificación iterativa.
+    # De forma que se van repartiendo las clases entre conjuntos de forma equitativa, empezando por las más raras
     train,_,trial,_ = iterative_train_test_split(df.values,class_present,test_size=1-train_size)
     train = pd.DataFrame(train,columns=df.columns)
     trial = pd.DataFrame(trial,columns=df.columns)
@@ -166,11 +162,6 @@ def create_dataset(df,target_cols,out_dir,train_size=0.7):
     val = pd.DataFrame(val,columns=df.columns)
     test = pd.DataFrame(test,columns=df.columns)
 
-    # Si queremos comprobamos que todas las clases están presentes en los tres conjuntos de datos
-    # (train[target_cols]>0).sum()
-    # (val[target_cols]>0).sum()
-    # (test[target_cols]>0).sum()
-
     # Almacenamos los dataframes en formato csv
     train.to_csv(f"{out_dir}/train.csv",index=False)
     val.to_csv(f"{out_dir}/val.csv",index=False)
@@ -179,8 +170,8 @@ def create_dataset(df,target_cols,out_dir,train_size=0.7):
 
 def main():
     """
-    Desde el main de este script en caso de ejecutarlo directamente lo que hacemos es crear un conjunto de entrenamiento, validación y test utilizando estratificación
-    iterativa para solventar posibles problemas de desequilibrio de clases, para ello le pasamos una lista con las columnas que nos interesan como etiqueta.
+    Desde el main de este script se crea un conjunto de entrenamiento, validación y test utilizando estratificación iterativa para solventar 
+    posibles problemas de desequilibrio de clases, para ello se pasa una lista con las columnas que nos interesan como etiqueta.
     """
     # Fijamos una semilla por replicabilidad
     torch.manual_seed(67)
@@ -188,8 +179,6 @@ def main():
 
     # Cargamos el csv con las etiquetas
     labels = pd.read_csv("etiquetas_fotos.csv")
-    ## Como tenemos desequilibrio de clases y algunas aparecen en muy pocas fotos, vamos a utilizar estratificación iterativa de forma que se vayan repartiendo las clases
-    ##  de forma equitativa empezando por las más raras
     target_cols = ['n. noltei','z. marina','g. vermiculophylla','sedimento','arena','roca','algas verdes','algas pardas','algas rojas','microfitobentos']
     out_dir = "./dataset_dividido"
 

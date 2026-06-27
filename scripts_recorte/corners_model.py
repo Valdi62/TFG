@@ -1,6 +1,8 @@
 import torch.nn as nn
 from torchvision import models
 
+## Código con el modelo que se utilizará para resolver el problema
+
 class TransferLearning(nn.Module):
     def __init__(self,base_model,dropout=0.3,size1=512,size2=128):
         super().__init__()
@@ -28,7 +30,7 @@ class TransferLearning(nn.Module):
         else:
             raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['ResNet50','EfficientNet_B3','ConvNeXt_tiny','MobileNet_V3_Large']")
 
-        # Congelar todos los pesos del modelo pre-entrenado inicialmente
+        # Congelar todos los pesos del modelo preentrenado inicialmente
         for param in self.model.parameters():
             param.requires_grad = False      
                                 
@@ -38,24 +40,27 @@ class TransferLearning(nn.Module):
                                     nn.ReLU()
                                     )
 
-        self.clas = nn.Sequential(
-                            nn.Linear(size2,1) # No necesitamos usar una activacion sigmoide porque usamos BCE con logits
-                                )
+        # Cabeza de clasificación
+        self.clas = nn.Linear(size2,1) # No necesitamos usar una activacion sigmoide porque usamos BCE con logits
+        # Cabeza de regresión
         self.reg = nn.Sequential(
                             nn.Linear(size2,8),
                             nn.Sigmoid()    # Usamos sigmoide porque las coordenadas estan normalizadas entre 0 y 1
                                 )
 
     def forward(self, x):
+        ## Pasada por la red convolucional ##
         x = self.model(x)
         x = self.head(x)
         x = self.layers(x)
         has_corners=self.clas(x)
         coordinates=self.reg(x)
 
+        # Se retorna la salida de ambas cabezas
         return {"classification": has_corners, "coordinates": coordinates}
     
     @property
     def name(self):
+        # Nombre del modelo actual en función de la arquitectura base empleada
         return f"Corners_{self.base_model}"
 

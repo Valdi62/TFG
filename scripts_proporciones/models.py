@@ -3,8 +3,9 @@ import torch.nn as nn
 from torchvision import models
 from . HardHistogramBatched import HardHistogramBatched
 
-# MR = MultivariateRegression
+## Código con el modelo que se utilizará para resolver el problema
 
+# MR = MultivariateRegression
 # Red Neuronal de multiregresión que usa una red convolucional como base
 class MRConvolutionalModel(nn.Module):
     def __init__(self,base_model,dropout=0.2,size1=1024,size2=512,use_histogram=False,num_bins=32):
@@ -14,9 +15,9 @@ class MRConvolutionalModel(nn.Module):
         self.num_bins = num_bins
 
         if self.use_histogram:
-            # Instanciamos la capa de histograma
+            # Se instancia la capa de histograma
             self.histogram = HardHistogramBatched(n_features=3,num_bins=self.num_bins)
-            # Instanciamos un conjunto de capas para preparar la salida del histograma y poder concatenarla con la salida normal de la red
+            # Se instancia un conjunto de capas para preparar la salida del histograma y poder concatenarla con la salida normal de la red
             self.out_channels = 3*num_bins
             self.hist_proj = nn.Sequential(nn.Linear(self.out_channels,size2),
                                            nn.ReLU())
@@ -46,12 +47,12 @@ class MRConvolutionalModel(nn.Module):
         else:
             raise ValueError(f"El modelo base {self.base_model} no está permitido, elija entre ['RegNet_Y_3_2GF','ResNet50','EfficientNetV2_small','ConvNeXt_tiny','ConvNeXt_small']")
 
-        # Congelar todos los pesos del modelo base pre-entrenado inicialmente
+        # Congelar todos los pesos del modelo base preentrenado inicialmente
         for param in self.model.parameters():
             param.requires_grad = False              
 
         self.layers = nn.Sequential(#nn.ReLU(),
-                                    nn.GELU(),  # Como estamos utilizando ConvNext usamos Gelu en vez de Relu porque su arquitectura emplea esta función
+                                    nn.GELU(),  # Como el modelo ganador es ConvNext se usan Gelu en vez de Relu porque su arquitectura emplea dicha función
                                     nn.Dropout(dropout),
                                     nn.Linear(size1,size2),
                                     #nn.ReLU(),
@@ -62,6 +63,7 @@ class MRConvolutionalModel(nn.Module):
         else:
             final_size = size2
 
+        # Bloque final de salida
         self.output = nn.Sequential(nn.Dropout(dropout),
                                     nn.Linear(final_size,10),
                                     nn.LogSoftmax(dim=1)) # Capa de salida logsoftmax para usar la divergencia kl con logaritmos como funcion de perdida
@@ -73,14 +75,13 @@ class MRConvolutionalModel(nn.Module):
         x_conv = self.layers(x_conv)
 
         if self.use_histogram: 
-            ## Preprocesado de la entrada para poder pasar por la capa de histograma
             # Para aplicar la capa de histograma podemos reducir el tamaño general de las imágenes para que no se agote la memoria por las operaciones
             # Al usar el modo bilinear cada pixel resultante se calcula a partir de la media de pixeles cercanos en la imagen original
             x_reduced = nn.functional.interpolate(x_hist,size=(192,192),mode='bilinear',align_corners=False)
             # Combinamos las dimensiones de alto y ancho al final para aplanar la imagen para pasarla por la capa de histograma
             x_reduced = x_reduced.view(x_reduced.shape[0],x_reduced.shape[1],-1)
 
-            # Intercambiamos las dos últimas dimensiones porque luego la capa de histograma las vuelve a intercambiar y las dejará correctamente
+            # Intercambiamos las dos últimas dimensiones porque posteriormente la capa de histograma las vuelve a intercambiar y las dejará correctamente
             x_reduced = x_reduced.mT
 
             ## Pasada por la capa de Histograma ##
@@ -96,6 +97,7 @@ class MRConvolutionalModel(nn.Module):
 
     @property
     def name(self):
+        # Nombre del modelo actual en función de la arquitectura base empleada
         if self.use_histogram:
             return f"MRConvolutional_Histogram_{self.base_model}"
         else:
