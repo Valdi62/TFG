@@ -329,6 +329,7 @@ Parece que empezar con esas capas ya descongeladas y entrenar directamente el mo
 aunque la bce sea un poco peor de esta forma, no parece impactar tanto a las medidas de precisión y la perdida de regresión es mucho mejor.
 """
 
+
 def main():
     """
     Desde el main creamos los dataloaders y el modelo correspondiente con los mejores hiperparámetros enconctrados y realizamos el 
